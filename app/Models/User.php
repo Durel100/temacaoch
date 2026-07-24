@@ -10,6 +10,8 @@ use App\Notifications\VerifyEmailNotification;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
+     use HasFactory, Notifiable;
+     
     protected $fillable = ['name', 'email', 'phone', 'locale', 'is_admin', 'password', 'onboarding_completed_at'];
 
     protected $hidden = ['password', 'remember_token'];
