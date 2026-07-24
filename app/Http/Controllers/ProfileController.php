@@ -35,6 +35,7 @@ class ProfileController extends Controller
                 'safeIncome'   => $calculator->getSafeIncomeBaseline(),
                 'totalCharges' => $calculator->getTotalMonthlyFixedCharges(),
                 'resteAVivre'  => $calculator->getResteAVivre(),
+                'realRemaining' => $calculator->getRealRemainingBudget(),
             ],
             'activeDebtsCount'   => $user->debts()->where('remaining_amount', '>', 0)->count(),
             'activeChargesCount' => $user->fixedCharges()->where('is_active', true)->count(),

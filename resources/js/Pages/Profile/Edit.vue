@@ -281,10 +281,10 @@ const preferenceLabels = computed(() => ({
                         </p>
                     </div>
                     <div class="text-center">
-                        <p class="text-[11px] text-[#1A2E2B]/40 mb-0.5">{{ t('rest_to_live') }}</p>
+                        <p class="text-[11px] text-[#1A2E2B]/40 mb-0.5">{{ t('remaining_budget') }}</p>
                         <p class="text-[13px] font-semibold"
-                           :class="summary.resteAVivre >= 0 ? 'text-tema-green' : 'text-tema-brick'">
-                            {{ formatFcfa(summary.resteAVivre) }}
+                        :class="summary.realRemaining >= 0 ? 'text-tema-green' : 'text-tema-brick'">
+                            {{ formatFcfa(summary.realRemaining) }}
                         </p>
                     </div>
                 </div>
