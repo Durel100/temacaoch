@@ -89,6 +89,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/charges',                  [FinanceController::class, 'storeCharge'])->name('charges.store');
             Route::patch('/charges/{charge}/toggle', [FinanceController::class, 'toggleCharge'])->name('charges.toggle');
             Route::delete('/charges/{charge}',       [FinanceController::class, 'destroyCharge'])->name('charges.destroy');
+            Route::post('/charges/{charge}/pay', [FinanceController::class, 'payCharge'])->name('charges.pay');
         });
 
         // ── Objectifs ───────────────────────────────────────────────

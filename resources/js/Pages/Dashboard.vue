@@ -148,6 +148,27 @@ function deleteGoal(id) {
     deleteGoalForm.delete(route('goals.destroy', id));
 }
 
+// ─── Paiement charge fixe depuis le dashboard ─────────────────────
+const payingCharge   = ref(null);
+const chargePayForm  = useForm({ amount: null });
+
+function openPayCharge(charge) {
+    payingCharge.value   = charge;
+    chargePayForm.amount = charge.budget; // pré-remplir avec le montant total
+}
+
+function closePayCharge() {
+    payingCharge.value   = null;
+    chargePayForm.amount = null;
+}
+
+function submitPayCharge() {
+    if (!payingCharge.value) return;
+    chargePayForm.post(route('finances.charges.pay', payingCharge.value.id), {
+        onSuccess: () => closePayCharge(),
+    });
+}
+
 // ─── Dettes ─────────────────────────────────────────────────────────
 const totalDebt    = computed(() => (props.debts ?? []).reduce((s, d) => s + d.remaining_amount, 0));
 const repayingDebt = ref(null);
@@ -202,7 +223,7 @@ function translateCategory(name) {
     <div class="min-h-screen bg-[#FAF6F0]">
 
         <!-- ── Header ── -->
-        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8">
+        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8" style="padding-top: env(safe-area-inset-top)">
             <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
                 <div>
                     <h1 class="font-display text-[20px] font-semibold text-tema-dark leading-tight">
@@ -604,7 +625,53 @@ function translateCategory(name) {
                         <p v-else class="text-[11px] text-tema-dark/35 text-center mt-0.5">
                             {{ formatFcfa(charge.remaining) }} {{ t('remaining_budget_label') }}
                         </p>
+                        <!-- Bouton payer -->
+                        <button @click="openPayCharge(charge)"
+                                class="mt-2 text-[11px] font-semibold px-3 py-1 rounded-full transition-all"
+                                :class="charge.percent >= 100
+                                    ? 'bg-tema-green/10 text-tema-green'
+                                    : 'bg-[#1A2E2B]/5 text-tema-dark/60 hover:bg-tema-green/10 hover:text-tema-green'">
+                            {{ charge.percent >= 100 ? t('paid_badge') : t('pay_btn') }}
+                        </button>
                     </div>
+                </div>
+
+                <!-- Popup paiement charge fixe -->
+                <div v-if="payingCharge"
+                     class="mt-4 pt-4 border-t border-[#1A2E2B]/6">
+                    <p class="text-[13px] font-semibold text-tema-dark mb-1">
+                        💳 {{ t('pay_charge') }} : {{ payingCharge.label }}
+                    </p>
+                    <p class="text-[12px] text-tema-dark/50 mb-3">
+                        {{ t('pay_charge_desc') }}
+                    </p>
+                    <div class="flex gap-2 mb-2">
+                        <input type="number"
+                               v-model.number="chargePayForm.amount"
+                               :placeholder="t('amount')"
+                               min="1"
+                               :max="payingCharge.budget"
+                               class="flex-1 text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5">
+                        <button @click="submitPayCharge"
+                                :disabled="!chargePayForm.amount || chargePayForm.amount <= 0 || chargePayForm.processing"
+                                class="bg-tema-green text-white text-[13px] font-semibold px-4 rounded-xl disabled:opacity-40 hover:bg-tema-green-light transition-all">
+                            {{ chargePayForm.processing ? '...' : t('confirm') }}
+                        </button>
+                    </div>
+                    <div class="flex gap-2 mb-2">
+                        <button @click="chargePayForm.amount = Math.round(payingCharge.budget * 0.5)"
+                                class="flex-1 text-[11px] py-1.5 rounded-full border-[1.5px] border-[#1A2E2B]/10 text-tema-dark/60 hover:border-tema-green hover:text-tema-green transition-all">
+                            50%
+                        </button>
+                        <button @click="chargePayForm.amount = payingCharge.budget"
+                                class="flex-1 text-[11px] py-1.5 rounded-full border-[1.5px] border-[#1A2E2B]/10 text-tema-dark/60 hover:border-tema-green hover:text-tema-green transition-all">
+                            {{ t('settle_all') }}
+                        </button>
+                    </div>
+                    <button @click="closePayCharge"
+                            class="w-full text-[12px] text-tema-dark/40 hover:text-tema-dark py-1.5 transition-colors">
+                        {{ t('cancel') }}
+                    </button>
                 </div>
             </div>
 

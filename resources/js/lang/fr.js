@@ -590,4 +590,11 @@ export default {
     category_high_share:  'des dépenses — point d\'attention',
     select_category_or_note: 'Sélectionne une catégorie ou ajoute une note pour continuer',
     cat_other: 'Autre',
+    'validation.required': 'Ce champ est obligatoire',
+    tontine_cycle_desc_months: 'Combien de mois entre chaque réception ?',
+    pay_btn:        'Payer',
+    paid_badge:     '✓ Payé',
+    pay_charge:     'Payer la charge',
+    pay_charge_desc:'Ce montant sera déduit de ton budget du mois.',
+
 };

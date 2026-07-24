@@ -12,7 +12,6 @@ class FinancialCalculatorService
 
     /**
      * Vérifie si on est en mode snapshot actif ce mois
-     * = l'utilisateur a déclaré son solde actuel à l'onboarding ce mois-ci
      */
     public function isSnapshotMode(): bool
     {
@@ -34,10 +33,6 @@ class FinancialCalculatorService
 
     /**
      * Revenu de référence adapté à la situation réelle du mois
-     *
-     * Mode snapshot : montant déclaré à l'onboarding (solde actuel)
-     * Mode standard : minimum des 3 derniers mois ou revenu onboarding
-     * + contribution du conjoint si applicable
      */
     public function getSafeIncomeBaseline(): float
     {
@@ -59,7 +54,6 @@ class FinancialCalculatorService
                 ->where('is_active', true)
                 ->sum('amount');
 
-        // Ajouter la contribution du conjoint si applicable
         if (
             $profile?->spouse_contributes &&
             $profile?->spouse_monthly_contribution > 0
@@ -72,8 +66,7 @@ class FinancialCalculatorService
 
     /**
      * Total des charges fixes mensuelles
-     * Inclut : charges fixes, tontines, argent de poche, remboursements dettes
-     * Si charges partagées avec conjoint : charges fixes divisées par 2
+     * Utilisé uniquement pour l'affichage informatif — ne déduit plus du budget
      */
     public function getTotalMonthlyFixedCharges(): float
     {
@@ -84,45 +77,15 @@ class FinancialCalculatorService
             ->get()
             ->sum(fn ($c) => $c->monthly_equivalent);
 
-        // Partager les charges si conjoint contribue et charges partagées
         if ($profile?->spouse_contributes && $profile?->shared_fixed_charges) {
             $fixedCharges = $fixedCharges / 2;
         }
 
-        $tontineContributions = $this->getMonthlyTontineCost();
-
-        $allowances = $this->user->dependents()
-            ->get()
-            ->sum(fn ($d) => $d->monthly_allowance_cost);
-
-        $debtPayments = $this->user->debts()
-            ->whereNotNull('monthly_payment')
-            ->sum('monthly_payment');
-
-        return $fixedCharges + $tontineContributions + $allowances + $debtPayments;
+        return $fixedCharges;
     }
 
     /**
-     * Coût mensuel des cotisations tontine actives
-     * Utilise cycle_days pour supporter tous les cycles personnalisés
-     */
-    public function getMonthlyTontineCost(): float
-    {
-        return $this->user->tontineGroups()
-            ->where('is_active', true)
-            ->get()
-            ->sum(function ($group) {
-                $cycleDays      = $group->cycle_days ?? 30;
-                $cyclesPerMonth = 30 / $cycleDays;
-                return $group->contribution_amount * $cyclesPerMonth;
-            });
-    }
-
-    /**
-     * Nombre de jours restants dans le "mois financier" de l'utilisateur
-     *
-     * Salarié  : jours jusqu'au prochain jour de paye (mois glissant)
-     * Non salarié : jours restants dans le mois calendaire
+     * Nombre de jours restants dans le mois financier
      */
     public function getDaysLeftInFinancialMonth(): int
     {
@@ -144,25 +107,23 @@ class FinancialCalculatorService
     }
 
     /**
-     * Reste à vivre adapté selon le type d'emploi et le mode snapshot
+     * Reste à vivre = revenu de référence
+     * Les charges fixes ne sont plus déduites automatiquement
+     * Elles servent uniquement à l'affichage informatif
      *
-     * Mode snapshot : montant restant − charges encore à payer
-     * Salarié standard : revenu − charges (mois glissant complet)
-     * Non salarié : (revenu − charges) × prorata jours restants
+     * Mode snapshot : montant déclaré à l'onboarding
+     * Non salarié : proratisé selon les jours restants
      */
     public function getResteAVivre(): float
     {
         $profile = $this->user->profile;
 
         if ($this->isSnapshotMode()) {
-            return (float) (
-                $profile->current_month_remaining
-                - ($profile->remaining_fixed_charges_this_month ?? 0)
-            );
+            // Mode snapshot : on repart du solde déclaré
+            return (float) $profile->current_month_remaining;
         }
 
-        $baseRemaining = $this->getSafeIncomeBaseline()
-            - $this->getTotalMonthlyFixedCharges();
+        $baseIncome = $this->getSafeIncomeBaseline();
 
         // Non salarié : proratiser selon les jours restants
         if ($profile?->employment_type === 'non_salaried') {
@@ -170,28 +131,27 @@ class FinancialCalculatorService
             $totalDays = now()->daysInMonth;
 
             if ($totalDays > 0) {
-                return $baseRemaining * ($daysLeft / $totalDays);
+                return $baseIncome * ($daysLeft / $totalDays);
             }
         }
 
-        return $baseRemaining;
+        return $baseIncome;
     }
 
     /**
-     * Dépenses libres (hors charges fixes) ce mois
+     * Toutes les dépenses du mois (toutes transactions "out" sans distinction)
      */
     public function getCurrentMonthVariableSpending(): float
     {
         return (float) $this->user->transactions()
             ->where('direction', 'out')
-            ->whereNull('fixed_charge_id')
             ->whereMonth('transacted_at', now()->month)
             ->whereYear('transacted_at', now()->year)
             ->sum('amount');
     }
 
     /**
-     * Entrées de transactions ce mois (hors revenu principal)
+     * Entrées de transactions ce mois
      */
     public function getCurrentMonthTransactionsIn(): float
     {
@@ -203,34 +163,13 @@ class FinancialCalculatorService
     }
 
     /**
-     * Surplus des budgets fixes dépassés ce mois
-     * Ce surplus est prélevé sur le reste à vivre
-     */
-    public function getFixedChargesSurplus(): float
-    {
-        return $this->user->fixedCharges()
-            ->where('is_active', true)
-            ->get()
-            ->sum(function ($charge) {
-                $spent = $this->user->transactions()
-                    ->where('fixed_charge_id', $charge->id)
-                    ->where('direction', 'out')
-                    ->whereMonth('transacted_at', now()->month)
-                    ->whereYear('transacted_at', now()->year)
-                    ->sum('amount');
-                return max(0, $spent - $charge->monthly_equivalent);
-            });
-    }
-
-    /**
      * Budget réel restant ce mois
-     * = reste à vivre − dépenses libres − surplus charges fixes + entrées
+     * = reste à vivre − toutes les dépenses + toutes les entrées
      */
     public function getRealRemainingBudget(): float
     {
         return $this->getResteAVivre()
             - $this->getCurrentMonthVariableSpending()
-            - $this->getFixedChargesSurplus()
             + $this->getCurrentMonthTransactionsIn();
     }
 
@@ -252,7 +191,6 @@ class FinancialCalculatorService
 
     /**
      * Moyenne de dépenses par catégorie sur les 3 derniers mois
-     * Sert de référence pour détecter les dépassements
      */
     public function getAverageSpendingByCategory(): array
     {
@@ -273,8 +211,7 @@ class FinancialCalculatorService
     }
 
     /**
-     * Catégories où les dépenses dépassent la moyenne d'un seuil donné
-     * Le seuil est calibré selon budget_preference de l'utilisateur
+     * Catégories où les dépenses dépassent la moyenne
      */
     public function getOverspendingCategories(float $thresholdMultiplier = 1.3): array
     {
@@ -286,9 +223,9 @@ class FinancialCalculatorService
             $avg = $average[$category] ?? null;
             if ($avg && $amount > $avg * $thresholdMultiplier) {
                 $overspending[] = [
-                    'category'    => $category,
-                    'current'     => $amount,
-                    'average'     => $avg,
+                    'category'     => $category,
+                    'current'      => $amount,
+                    'average'      => $avg,
                     'percent_over' => round((($amount / $avg) - 1) * 100),
                 ];
             }
@@ -299,6 +236,7 @@ class FinancialCalculatorService
 
     /**
      * Consommation réelle de chaque charge fixe ce mois
+     * (toutes les transactions liées à cette charge, quelle que soit leur nature)
      */
     public function getFixedChargesConsumption(): array
     {
@@ -349,14 +287,13 @@ class FinancialCalculatorService
 
         if (!$cycle) return null;
 
-        // Calcul correct : comparer uniquement les dates sans l'heure
         $daysUntil = (int) now()->startOfDay()->diffInDays(
             \Carbon\Carbon::parse($cycle->scheduled_date)->startOfDay()
         );
 
         return [
-            'amount'    => $cycle->payout_amount ?? ($this->user->tontineGroups()->where('is_active', true)->first()?->contribution_amount * $this->user->tontineGroups()->where('is_active', true)->first()?->total_members),
-            'date'      => $cycle->scheduled_date,
+            'amount'     => $cycle->payout_amount ?? ($this->user->tontineGroups()->where('is_active', true)->first()?->contribution_amount * $this->user->tontineGroups()->where('is_active', true)->first()?->total_members),
+            'date'       => $cycle->scheduled_date,
             'days_until' => $daysUntil,
         ];
     }
@@ -375,4 +312,8 @@ class FinancialCalculatorService
             ->get()
             ->toArray();
     }
+
+    // Compatibilité — plus utilisé mais gardé pour éviter les erreurs
+    public function getFixedChargesSurplus(): float { return 0; }
+    public function getMonthlyTontineCost(): float { return 0; }
 }

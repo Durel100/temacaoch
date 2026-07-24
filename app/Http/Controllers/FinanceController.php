@@ -209,4 +209,75 @@ class FinanceController extends Controller
         $charge->delete();
         return back()->with('success', 'Charge supprimée.');
     }
+
+    public function payCharge(Request $request, FixedCharge $charge)
+    {
+        if ($charge->user_id !== $request->user()->id) abort(403);
+
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:1',
+        ]);
+
+        $user = $request->user();
+
+        // Trouver la catégorie correspondante ou en créer une
+        $category = \App\Models\Category::where('name', $charge->label)
+            ->whereNull('user_id')
+            ->first()
+            ?? \App\Models\Category::firstOrCreate(
+                ['name' => $charge->label, 'user_id' => $user->id],
+                [
+                    'icon'              => 'wallet',
+                    'default_direction' => 'out',
+                    'is_system'         => false,
+                ]
+            );
+
+        // Créer la transaction
+        \App\Models\Transaction::create([
+            'user_id'        => $user->id,
+            'amount'         => $validated['amount'],
+            'direction'      => 'out',
+            'category_id'    => $category->id,
+            'fixed_charge_id'=> $charge->id,
+            'transacted_at'  => now(),
+            'source'         => 'manual_custom',
+            'note'           => 'Paiement : ' . $charge->label,
+        ]);
+
+        // Sync découvert
+        $user->load([
+            'profile', 'dependents', 'incomeSources',
+            'fixedCharges', 'debts', 'financialGoals', 'tontineGroups',
+        ]);
+        $calculator    = new \App\Http\Services\FinancialCalculatorService($user);
+        $realRemaining = $calculator->getRealRemainingBudget();
+
+        $existingDebt = \App\Models\Debt::where('user_id', $user->id)
+            ->where('label', 'Découvert budget')
+            ->whereMonth('created_at', now()->month)
+            ->whereYear('created_at', now()->year)
+            ->first();
+
+        if ($realRemaining >= 0) {
+            $existingDebt?->delete();
+        } else {
+            $amount = round(abs($realRemaining), 2);
+            if ($existingDebt) {
+                $existingDebt->update([
+                    'remaining_amount' => $amount,
+                    'total_amount'     => max($existingDebt->total_amount, $amount),
+                ]);
+            } else {
+                \App\Models\Debt::create([
+                    'user_id'          => $user->id,
+                    'label'            => 'Découvert budget',
+                    'total_amount'     => $amount,
+                    'remaining_amount' => $amount,
+                ]);
+            }
+        }
+
+        return back()->with('success', 'Paiement enregistré — déduit de ton budget.');
+    }
 }

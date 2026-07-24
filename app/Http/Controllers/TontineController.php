@@ -72,7 +72,7 @@ class TontineController extends Controller
         $validated = $request->validate([
             'name'                => 'required|string|max:255',
             'contribution_amount' => 'required|numeric|min:500',
-            'cycle_days'          => 'required|integer|min:1|max:365',
+            'cycle_days'          => 'nullable|integer|min:1|max:365',
             'total_members'       => 'required|integer|min:2|max:50',
             'my_positions'        => 'required|array|min:1',
             'my_positions.*'      => 'required|integer|min:1',

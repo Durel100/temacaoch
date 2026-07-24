@@ -64,7 +64,6 @@ class TransactionController extends Controller
             'direction'       => 'required|in:in,out',
             'category_id'     => 'nullable|exists:categories,id',
             'quick_action_id' => 'nullable|exists:quick_actions,id',
-            'fixed_charge_id' => 'nullable|exists:fixed_charges,id',
             'source'          => 'nullable|in:quick_action,manual_custom',
             'transacted_at'   => 'required|date',
             'note'            => 'nullable|string|max:500',
@@ -89,29 +88,13 @@ class TransactionController extends Controller
             $validated['category_id'] = $default->id;
         }
 
-        // Lier au fixed_charge_id via le bouton rapide si non fourni
-        if (!empty($validated['quick_action_id']) && empty($validated['fixed_charge_id'])) {
-            $quickAction = QuickAction::find($validated['quick_action_id']);
-            if ($quickAction?->fixed_charge_id) {
-                $validated['fixed_charge_id'] = $quickAction->fixed_charge_id;
-            }
-        }
-
         Transaction::create($validated);
 
         if (!empty($validated['quick_action_id'])) {
             QuickAction::find($validated['quick_action_id'])?->incrementUsage();
         }
 
-        // ← AJOUT : vérifier le budget après chaque dépense
-        if ($validated['direction'] === 'out') {
-            $this->syncOverdraftDebt($request->user());
-        }
-
-        // ← AJOUT : supprimer le découvert si une entrée remet le budget positif
-        if ($validated['direction'] === 'in') {
-            $this->syncOverdraftDebt($request->user());
-        }
+        $this->syncOverdraftDebt($request->user());
 
         return redirect()->route('transactions.index')
             ->with('success', 'Transaction enregistrée.');

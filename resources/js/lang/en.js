@@ -587,4 +587,10 @@ export default {
     category_high_share:  'of expenses — worth monitoring',
     select_category_or_note: 'Select a category or add a note to continue',
     cat_other: 'Other',
+    'validation.required': 'This field is required',
+    tontine_cycle_desc_months: 'How many months between each payout?',
+    pay_btn:        'Pay',
+    paid_badge:     '✓ Paid',
+    pay_charge:     'Pay charge',
+    pay_charge_desc:'This amount will be deducted from your monthly budget.',
 };
