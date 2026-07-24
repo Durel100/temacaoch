@@ -5,6 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\TontineGroup;
 use App\Models\TontineCycle;
 use App\Models\TontineContribution;
+use App\Models\Transaction;
+use App\Models\Category;
+use App\Models\Debt;
+use App\Http\Services\FinancialCalculatorService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -73,6 +77,8 @@ class TontineController extends Controller
             'my_positions'        => 'required|array|min:1',
             'my_positions.*'      => 'required|integer|min:1',
             'start_date' => 'required|date',
+            'cycle_months'   => 'nullable|integer|min:1|max:24',
+            'frequency_type' => 'required|in:days,months',
         ]);
 
         // Vérifier que toutes les positions sont valides
@@ -111,6 +117,8 @@ class TontineController extends Controller
             'my_positions'        => $validated['my_positions'],
             'start_date'          => $validated['start_date'],
             'is_active'           => true,
+            'cycle_months'   => $validated['cycle_months'],
+            'frequency_type' => $validated['frequency_type'],
         ]);
 
         $tontine->generateCycles();
@@ -167,38 +175,104 @@ class TontineController extends Controller
      */
     public function markPaid(Request $request, TontineCycle $cycle)
     {
-        // Vérifier que ce cycle appartient bien à l'utilisateur
         if ($cycle->group->user_id !== $request->user()->id) {
             abort(403);
         }
 
+        $user   = $request->user();
+        $amount = $cycle->group->contribution_amount;
+
         $contribution = $cycle->contribution;
 
         if (!$contribution) {
-            // Créer la contribution si elle n'existe pas encore
             $contribution = $cycle->contribution()->create([
-                'amount_due' => $cycle->group->contribution_amount,
+                'amount_due'  => $amount,
                 'amount_paid' => 0,
-                'status' => 'pending',
+                'status'      => 'pending',
             ]);
         }
 
         $contribution->markAsPaid();
 
-        // Créer la contribution pour le prochain cycle si elle n'existe pas encore
+        // Créer une transaction "out" pour débiter le budget
+        $category = Category::firstOrCreate(
+            ['name' => 'Tontine', 'user_id' => null],
+            [
+                'icon'              => 'users',
+                'default_direction' => 'out',
+                'is_system'         => true,
+                'translation_key'   => 'cat_tontine',
+            ]
+        );
+
+        Transaction::create([
+            'user_id'       => $user->id,
+            'amount'        => $amount,
+            'direction'     => 'out',
+            'category_id'   => $category->id,
+            'transacted_at' => now(),
+            'source'        => 'manual_custom',
+            'note'          => 'Cotisation tontine : ' . $cycle->group->name,
+        ]);
+
+        // Synchroniser le découvert
+        $this->syncOverdraftDebt($user);
+
+        // Préparer le prochain cycle
         $nextCycle = $cycle->group->cycles()
             ->where('cycle_number', $cycle->cycle_number + 1)
             ->first();
 
         if ($nextCycle && !$nextCycle->contribution) {
             $nextCycle->contribution()->create([
-                'amount_due' => $cycle->group->contribution_amount,
+                'amount_due'  => $amount,
                 'amount_paid' => 0,
-                'status' => 'pending',
+                'status'      => 'pending',
             ]);
         }
 
-        return back()->with('success', 'Cotisation marquée comme payée.');
+        return back()->with('success', 'Cotisation enregistrée — déduite de ton budget.');
+    }
+
+    /**
+     * Synchronise la dette de découvert après une dépense
+     */
+    private function syncOverdraftDebt($user): void
+    {
+        $user->load([
+            'profile', 'dependents', 'incomeSources',
+            'fixedCharges', 'debts', 'financialGoals', 'tontineGroups',
+        ]);
+
+        $calculator    = new FinancialCalculatorService($user);
+        $realRemaining = $calculator->getRealRemainingBudget();
+
+        $existingDebt = Debt::where('user_id', $user->id)
+            ->where('label', 'Découvert budget')
+            ->whereMonth('created_at', now()->month)
+            ->whereYear('created_at',  now()->year)
+            ->first();
+
+        if ($realRemaining >= 0) {
+            $existingDebt?->delete();
+            return;
+        }
+
+        $overdraftAmount = round(abs($realRemaining), 2);
+
+        if ($existingDebt) {
+            $existingDebt->update([
+                'remaining_amount' => $overdraftAmount,
+                'total_amount'     => max($existingDebt->total_amount, $overdraftAmount),
+            ]);
+        } else {
+            Debt::create([
+                'user_id'          => $user->id,
+                'label'            => 'Découvert budget',
+                'total_amount'     => $overdraftAmount,
+                'remaining_amount' => $overdraftAmount,
+            ]);
+        }
     }
 
     /**

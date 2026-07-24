@@ -14,6 +14,8 @@ class TontineGroup extends Model
         'name',
         'contribution_amount',
         'cycle_days',
+        'cycle_months',
+        'frequency_type',
         'total_members',
         'my_position',
         'my_positions',
@@ -49,6 +51,7 @@ class TontineGroup extends Model
     {
         $currentDate = Carbon::parse($this->start_date);
         $myPositions = $this->my_positions ?? [$this->my_position];
+        $useMonths   = $this->frequency_type === 'months' && $this->cycle_months;
 
         for ($i = 1; $i <= $this->total_members; $i++) {
             $this->cycles()->create([
@@ -57,7 +60,13 @@ class TontineGroup extends Model
                 'is_my_turn'     => in_array($i, $myPositions),
                 'status'         => 'upcoming',
             ]);
-            $currentDate->addDays($this->cycle_days);
+
+            // Ajouter des mois exacts ou des jours selon le type
+            if ($useMonths) {
+                $currentDate->addMonths($this->cycle_months);
+            } else {
+                $currentDate->addDays($this->cycle_days);
+            }
         }
     }
 

@@ -6,11 +6,14 @@ import { useTranslation } from '@/Composables/useTranslation';
 const { t } = useTranslation();
 
 const commonCycles = [7, 10, 14, 30, 45, 60];
+const commonMonths = [1, 2, 3, 6];
 
 const form = useForm({
     name:                '',
     contribution_amount: null,
     cycle_days:          null,
+    cycle_months:        null,
+    frequency_type:      'days', // 'days' ou 'months'
     total_members:       null,
     my_positions:        [],
     start_date:          '',
@@ -41,11 +44,17 @@ const totalPayoutPreview = computed(() => {
 });
 
 const myPayoutDatesPreview = computed(() => {
-    if (!form.start_date || !form.my_positions.length || !form.cycle_days) return [];
+    if (!form.start_date || !form.my_positions.length) return [];
+    if (form.frequency_type === 'months' && !form.cycle_months) return [];
+    if (form.frequency_type === 'days' && !form.cycle_days) return [];
+
     return form.my_positions.map(pos => {
-        const start     = new Date(form.start_date);
-        const daysToAdd = (pos - 1) * form.cycle_days;
-        start.setDate(start.getDate() + daysToAdd);
+        const start = new Date(form.start_date);
+        if (form.frequency_type === 'months') {
+            start.setMonth(start.getMonth() + (pos - 1) * form.cycle_months);
+        } else {
+            start.setDate(start.getDate() + (pos - 1) * form.cycle_days);
+        }
         return {
             position: pos,
             date: start.toLocaleDateString('fr-FR', {
@@ -56,24 +65,40 @@ const myPayoutDatesPreview = computed(() => {
 });
 
 const totalDurationPreview = computed(() => {
-    if (!form.total_members || !form.cycle_days) return null;
-    const totalDays = form.total_members * form.cycle_days;
-    const months    = Math.floor(totalDays / 30);
-    const days      = totalDays % 30;
-    if (months === 0) return `${totalDays} ${t('days_label')}`;
-    if (days === 0)   return `${months} ${t('months')}`;
-    return `${months} ${t('months')} ${days} ${t('days_label')}`;
+    if (!form.total_members) return null;
+
+    if (form.frequency_type === 'months' && form.cycle_months) {
+        const totalMonths = form.total_members * form.cycle_months;
+        const years  = Math.floor(totalMonths / 12);
+        const months = totalMonths % 12;
+        if (years === 0) return `${totalMonths} ${t('months')}`;
+        if (months === 0) return `${years} an(s)`;
+        return `${years} an(s) ${months} ${t('months')}`;
+    }
+
+    if (form.cycle_days) {
+        const totalDays = form.total_members * form.cycle_days;
+        const months = Math.floor(totalDays / 30);
+        const days   = totalDays % 30;
+        if (months === 0) return `${totalDays} ${t('days_label')}`;
+        if (days === 0)   return `${months} ${t('months')}`;
+        return `${months} ${t('months')} ${days} ${t('days_label')}`;
+    }
+
+    return null;
 });
 
-const canSubmit = computed(() =>
-    form.name &&
-    form.contribution_amount &&
-    form.cycle_days &&
-    form.total_members >= 2 &&
-    form.my_positions.length > 0 &&
-    form.start_date &&
-    !form.processing
-);
+const canSubmit = computed(() => {
+    if (!form.name) return false;
+    if (!form.contribution_amount) return false;
+    if (form.frequency_type === 'months' && !form.cycle_months) return false;
+    if (form.frequency_type === 'days' && !form.cycle_days) return false;
+    if (!form.total_members || form.total_members < 2) return false;
+    if (!form.my_positions.length) return false;
+    if (!form.start_date) return false;
+    if (form.processing) return false;
+    return true;
+});
 
 function formatFcfa(amount) {
     return new Intl.NumberFormat('fr-FR').format(Math.round(amount)) + ' FCFA';
@@ -124,27 +149,79 @@ function submit() {
                 <p class="text-[12px] text-[#1A2E2B]/50 mb-3">
                     {{ t('tontine_cycle_desc') }}
                 </p>
-                <div class="flex flex-wrap gap-2 mb-3">
-                    <button v-for="days in commonCycles" :key="days"
-                            type="button"
-                            @click="form.cycle_days = days"
-                            class="px-3 py-2 rounded-full border-[1.5px] text-[12px] font-medium transition-all"
-                            :class="form.cycle_days === days
-                                ? 'border-tema-green bg-tema-green/8 text-tema-green'
-                                : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40 hover:text-tema-green'">
-                        {{ days }} {{ t('days_label') }}
+
+                <!-- Toggle jours / mois -->
+                <div class="flex bg-[#FAF6F0] rounded-xl p-1 mb-4">
+                    <button type="button"
+                            @click="form.frequency_type = 'days'; form.cycle_months = null"
+                            class="flex-1 py-2 text-[13px] font-semibold rounded-lg transition-all"
+                            :class="form.frequency_type === 'days'
+                                ? 'bg-white text-tema-green shadow-sm'
+                                : 'text-[#1A2E2B]/50 hover:text-[#1A2E2B]'">
+                        {{ t('days_label') }}
+                    </button>
+                    <button type="button"
+                            @click="form.frequency_type = 'months'; form.cycle_days = null"
+                            class="flex-1 py-2 text-[13px] font-semibold rounded-lg transition-all"
+                            :class="form.frequency_type === 'months'
+                                ? 'bg-white text-tema-green shadow-sm'
+                                : 'text-[#1A2E2B]/50 hover:text-[#1A2E2B]'">
+                        {{ t('months') }}
                     </button>
                 </div>
-                <div class="flex items-center gap-3">
-                    <input type="number"
-                           v-model.number="form.cycle_days"
-                           :placeholder="t('tontine_custom')"
-                           min="1" max="365"
-                           class="flex-1 text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
-                    <span class="text-[13px] text-[#1A2E2B]/50 flex-shrink-0">{{ t('days_label') }}</span>
+
+                <!-- Options jours -->
+                <div v-if="form.frequency_type === 'days'">
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <button v-for="days in commonCycles" :key="days"
+                                type="button"
+                                @click="form.cycle_days = days"
+                                class="px-3 py-2 rounded-full border-[1.5px] text-[12px] font-medium transition-all"
+                                :class="form.cycle_days === days
+                                    ? 'border-tema-green bg-tema-green/8 text-tema-green'
+                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40 hover:text-tema-green'">
+                            {{ days }} {{ t('days_label') }}
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input type="number"
+                               v-model.number="form.cycle_days"
+                               :placeholder="t('tontine_custom')"
+                               min="1" max="365"
+                               class="flex-1 text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
+                        <span class="text-[13px] text-[#1A2E2B]/50 flex-shrink-0">{{ t('days_label') }}</span>
+                    </div>
                 </div>
-                <p v-if="form.errors.cycle_days" class="text-[12px] text-tema-brick mt-1">
-                    {{ form.errors.cycle_days }}
+
+                <!-- Options mois -->
+                <div v-if="form.frequency_type === 'months'">
+                    <p class="text-[12px] text-tema-green/70 bg-tema-green/8 rounded-xl px-3 py-2 mb-3">
+                        ✓ Les dates seront calculées exactement mois par mois (1 mois = 1er au 1er, etc.)
+                    </p>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <button v-for="m in commonMonths" :key="m"
+                                type="button"
+                                @click="form.cycle_months = m"
+                                class="px-3 py-2 rounded-full border-[1.5px] text-[12px] font-medium transition-all"
+                                :class="form.cycle_months === m
+                                    ? 'border-tema-green bg-tema-green/8 text-tema-green'
+                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40 hover:text-tema-green'">
+                            {{ m }} {{ t('months') }}
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <input type="number"
+                               v-model.number="form.cycle_months"
+                               placeholder="Ex : 2"
+                               min="1" max="24"
+                               class="flex-1 text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
+                        <span class="text-[13px] text-[#1A2E2B]/50 flex-shrink-0">{{ t('months') }}</span>
+                    </div>
+                </div>
+
+                <p v-if="form.errors.cycle_days || form.errors.cycle_months"
+                   class="text-[12px] text-tema-brick mt-1">
+                    {{ form.errors.cycle_days || form.errors.cycle_months }}
                 </p>
             </div>
 

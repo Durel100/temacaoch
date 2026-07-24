@@ -588,6 +588,6 @@ export default {
     day_by_day:           'Détail jour par jour',
     habits_by_day:        'Habitudes par jour de semaine',
     category_high_share:  'des dépenses — point d\'attention',
-
     select_category_or_note: 'Sélectionne une catégorie ou ajoute une note pour continuer',
+    cat_other: 'Autre',
 };

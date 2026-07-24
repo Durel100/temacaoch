@@ -65,6 +65,11 @@ const progressPercent = computed(() => {
 const markPaidForm = useForm({});
 
 function markPaid(cycleId) {
+    const amount = new Intl.NumberFormat('fr-FR').format(Math.round(props.tontine.contribution_amount ?? 0));
+    const msg = locale.value === 'en'
+        ? `This contribution of ${amount} FCFA will be deducted from your monthly budget. Confirm?`
+        : `Cette cotisation de ${amount} FCFA sera déduite de ton budget du mois. Confirmer ?`;
+    if (!confirm(msg)) return;
     markPaidForm.post(route('tontines.cycles.mark-paid', cycleId), {
         preserveScroll: true,
     });
@@ -87,7 +92,7 @@ function deactivate() {
     <div class="min-h-screen bg-[#FAF6F0]">
 
         <!-- Header sticky -->
-        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8">
+        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8" style="padding-top: env(safe-area-inset-top)">
             <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <button @click="router.get(route('tontines.index'))"
