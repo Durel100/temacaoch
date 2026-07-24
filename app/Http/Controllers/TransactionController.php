@@ -80,25 +80,31 @@ class TransactionController extends Controller
         }
 
         // Créer ou mettre à jour la QuickAction pour les transactions manuelles
-        if (($validated['source'] ?? '') === 'manual_custom' && !empty($validated['category_id'])) {
-            $category = Category::find($validated['category_id']);
+        if (($validated['source'] ?? '') === 'manual_custom') {
+            $category = !empty($validated['category_id'])
+                ? Category::find($validated['category_id'])
+                : null;
 
-            if ($category) {
+            // Label = catégorie OU note OU on ignore
+            $label = $category?->name
+                ?? (!empty($validated['note']) ? $validated['note'] : null);
+
+            // Créer la QuickAction uniquement si on a un label significatif
+            if ($label) {
                 $quickAction = QuickAction::firstOrCreate(
                     [
-                        'user_id'     => $validated['user_id'],
-                        'category_id' => $validated['category_id'],
-                        'direction'   => $validated['direction'],
+                        'user_id'   => $validated['user_id'],
+                        'direction' => $validated['direction'],
+                        'label'     => $label,
                     ],
                     [
-                        'label'          => $category->name,
+                        'category_id'    => $validated['category_id'] ?? null,
                         'default_amount' => $validated['amount'],
                         'usage_count'    => 0,
                     ]
                 );
 
-                // Mettre à jour le montant par défaut avec une moyenne glissante
-                // Plus utilisée = plus de poids dans la moyenne
+                // Moyenne glissante pondérée pour le montant
                 $newAmount = round(
                     ($quickAction->default_amount * $quickAction->usage_count + $validated['amount'])
                     / ($quickAction->usage_count + 1)
