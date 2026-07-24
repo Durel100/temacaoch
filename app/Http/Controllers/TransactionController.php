@@ -19,38 +19,22 @@ class TransactionController extends Controller
     {
         $user = $request->user();
         $categories = Category::availableFor($user->id);
-        $fixedCharges = $user->fixedCharges()->where('is_active', true)->get();
-
+        // Récupérer les QuickActions personnalisées triées par usage
         $quickActions = $user->quickActions()
             ->with('category')
             ->orderByDesc('usage_count')
             ->orderByDesc('last_used_at')
+            ->limit(8) // max 8 boutons rapides
             ->get();
 
+        // Fallback sur les actions par défaut si aucune action personnalisée
         if ($quickActions->isEmpty()) {
             $quickActions = collect($this->getDefaultQuickActions($user->id, $categories));
         }
 
-        $quickActions = $quickActions->map(function ($action) use ($fixedCharges) {
-            $matchingCharge = $fixedCharges->first(function ($charge) use ($action) {
-                return strtolower(trim($charge->label)) === strtolower(trim($action['label'] ?? $action->label));
-            });
-
-            if (is_array($action)) {
-                $action['fixed_charge_id'] = $matchingCharge?->id;
-                $action['is_fixed_charge'] = $matchingCharge !== null;
-            } else {
-                $action->fixed_charge_id = $matchingCharge?->id;
-                $action->is_fixed_charge = $matchingCharge !== null;
-            }
-
-            return $action;
-        });
-
         return Inertia::render('Transactions/Create', [
             'categories'   => $categories,
             'quickActions' => $quickActions,
-            'fixedCharges' => $fixedCharges,
         ]);
     }
 
@@ -90,8 +74,38 @@ class TransactionController extends Controller
 
         Transaction::create($validated);
 
+        // Incrémenter l'usage si c'est une action rapide existante
         if (!empty($validated['quick_action_id'])) {
             QuickAction::find($validated['quick_action_id'])?->incrementUsage();
+        }
+
+        // Créer ou mettre à jour la QuickAction pour les transactions manuelles
+        if (($validated['source'] ?? '') === 'manual_custom' && !empty($validated['category_id'])) {
+            $category = Category::find($validated['category_id']);
+
+            if ($category) {
+                $quickAction = QuickAction::firstOrCreate(
+                    [
+                        'user_id'     => $validated['user_id'],
+                        'category_id' => $validated['category_id'],
+                        'direction'   => $validated['direction'],
+                    ],
+                    [
+                        'label'          => $category->name,
+                        'default_amount' => $validated['amount'],
+                        'usage_count'    => 0,
+                    ]
+                );
+
+                // Mettre à jour le montant par défaut avec une moyenne glissante
+                // Plus utilisée = plus de poids dans la moyenne
+                $newAmount = round(
+                    ($quickAction->default_amount * $quickAction->usage_count + $validated['amount'])
+                    / ($quickAction->usage_count + 1)
+                );
+                $quickAction->update(['default_amount' => $newAmount]);
+                $quickAction->incrementUsage();
+            }
         }
 
         $this->syncOverdraftDebt($request->user());
