@@ -72,7 +72,7 @@ class TontineController extends Controller
             'total_members'       => 'required|integer|min:2|max:50',
             'my_positions'        => 'required|array|min:1',
             'my_positions.*'      => 'required|integer|min:1',
-            'start_date'          => 'required|date|after_or_equal:today',
+            'start_date' => 'required|date',
         ]);
 
         // Vérifier que toutes les positions sont valides

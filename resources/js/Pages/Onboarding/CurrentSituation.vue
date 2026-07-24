@@ -30,7 +30,10 @@ function autoDetect() {
 const budgetPreview = computed(() => {
     const remaining = form.value.current_month_remaining;
     const charges   = form.value.remaining_fixed_charges_this_month;
-    if (remaining !== null && charges !== null) return remaining - charges;
+    // ← Accepter 0 comme valeur valide (pas seulement null)
+    if (remaining !== null && remaining !== undefined && charges !== null && charges !== undefined) {
+        return remaining - charges;
+    }
     return null;
 });
 
@@ -38,7 +41,8 @@ const canSubmit = computed(() => {
     if (isSalaried.value) {
         if (!form.value.salary_day) return false;
         if (form.value.salary_already_received === null) return false;
-        if (form.value.salary_already_received && !form.value.current_month_remaining) return false;
+        // ← Corrigé : vérifier null/undefined au lieu de falsy (0 est valide)
+        if (form.value.salary_already_received && form.value.current_month_remaining === null) return false;
     }
     return true;
 });
@@ -56,7 +60,7 @@ function submit() {
 <template>
     <div class="min-h-screen bg-[#FAF6F0]">
 
-        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8">
+        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8" style="padding-top: env(safe-area-inset-top)">
             <div class="max-w-2xl mx-auto flex items-center gap-3 px-4 py-3">
                 <div class="flex gap-1 flex-1">
                     <div v-for="step in 7" :key="step"

@@ -88,7 +88,7 @@ function submit() {
     <div class="min-h-screen bg-[#FAF6F0]">
 
         <!-- Header -->
-        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8">
+        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8" style="padding-top: env(safe-area-inset-top)">
             <div class="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
                 <button @click="router.get(route('tontines.index'))"
                         class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">

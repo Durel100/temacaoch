@@ -66,8 +66,10 @@ function cancelConfirm() {
     confirmAction.value = null;
 }
 
+// ← Corrigé : montant > 0 suffit, la catégorie est optionnelle
+// Si pas de catégorie → on utilise une catégorie par défaut côté serveur
 const canSubmitManual = computed(() =>
-    form.value.amount > 0 && form.value.category_id
+    form.value.amount > 0 && (form.value.category_id || form.value.note.trim().length > 0)
 );
 
 function submitManual() {
@@ -94,7 +96,6 @@ function formatFcfa(amount) {
     return new Intl.NumberFormat('fr-FR').format(amount) + ' FCFA';
 }
 
-// Dans le script setup de Create.vue
 const quickActionKeyMap = {
     'Transport':              'cat_transport',
     'Nourriture/Marché':      'cat_food',
@@ -112,7 +113,7 @@ function translateActionLabel(label) {
     <div class="min-h-screen bg-[#FAF6F0]">
 
         <!-- Header -->
-        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8">
+        <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8" style="padding-top: env(safe-area-inset-top)">
             <div class="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
                 <button @click="router.get(route('dashboard'))"
                         class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">
@@ -323,10 +324,13 @@ function translateActionLabel(label) {
                     </div>
                 </div>
 
-                <!-- Catégorie -->
+                <!-- Catégorie (optionnelle si note remplie) -->
                 <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-4">
-                    <label class="block text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">
+                    <label class="block text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-1">
                         {{ t('income_type') }}
+                        <span class="normal-case font-normal ml-1 text-[#1A2E2B]/30">
+                            {{ form.note.trim() ? t('optional') : '' }}
+                        </span>
                     </label>
                     <div class="grid grid-cols-2 gap-2">
                         <button v-for="cat in (form.direction === 'out' ? outCategories : inCategories)"
@@ -356,11 +360,19 @@ function translateActionLabel(label) {
                            class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
                 </div>
 
-                <button @click="submitManual"
+                <!-- Bouton toujours visible si montant > 0 -->
+                <button v-if="form.amount > 0"
+                        @click="submitManual"
                         :disabled="!canSubmitManual || isSubmitting"
                         class="w-full bg-tema-green text-white font-semibold py-4 rounded-2xl text-[15px] hover:bg-tema-green-light transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm mb-6">
                     {{ isSubmitting ? t('saving') : t('save_transaction') }}
                 </button>
+
+                <!-- Message guide si montant > 0 mais ni catégorie ni note -->
+                <p v-if="form.amount > 0 && !form.category_id && !form.note.trim()"
+                   class="text-[12px] text-[#1A2E2B]/40 text-center -mt-2 mb-6">
+                    {{ t('select_category_or_note') }}
+                </p>
 
             </div>
 
