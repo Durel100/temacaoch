@@ -585,4 +585,6 @@ export default {
     day_by_day:           'Day by day breakdown',
     habits_by_day:        'Spending habits by day of week',
     category_high_share:  'of expenses — worth monitoring',
+
+    select_category_or_note: 'Select a category or add a note to continue',
 };

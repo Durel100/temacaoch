@@ -115,6 +115,28 @@ class TontineController extends Controller
 
         $tontine->generateCycles();
 
+        // Marquer automatiquement les cycles passés lors d'une création antidatée
+        $today = now()->startOfDay();
+        $tontine->cycles()->each(function ($cycle) use ($today) {
+            $cycleDate = \Carbon\Carbon::parse($cycle->scheduled_date)->startOfDay();
+
+            if ($cycleDate->lt($today)) {
+                if ($cycle->is_my_turn) {
+                    // Mon tour de réception déjà passé → completed
+                    $cycle->update(['status' => 'completed']);
+                } else {
+                    // Cotisation déjà due → créer contribution late
+                    if (!$cycle->contribution) {
+                        $cycle->contribution()->create([
+                            'amount_due'  => $cycle->group->contribution_amount,
+                            'amount_paid' => 0,
+                            'status'      => 'late',
+                        ]);
+                    }
+                }
+            }
+        });
+
         return redirect()->route('tontines.show', $tontine->id)
             ->with('success', 'Tontine créée.');
     }
