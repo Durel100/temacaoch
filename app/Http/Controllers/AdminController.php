@@ -134,4 +134,16 @@ class AdminController extends Controller
         $user->update(['is_admin' => !$user->is_admin]);
         return back()->with('success', 'Statut admin modifié.');
     }
+
+    public function destroyUser(\App\Models\User $user)
+    {
+        // Ne pas supprimer un admin
+        if ($user->is_admin) {
+            return back()->with('error', 'Impossible de supprimer un administrateur.');
+        }
+
+        $user->delete();
+
+        return back()->with('success', 'Compte supprimé.');
+    }
 }

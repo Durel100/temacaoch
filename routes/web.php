@@ -34,6 +34,7 @@ Route::middleware('auth')->group(function () {
         ->group(function () {
             Route::get('/',      [AdminController::class, 'dashboard'])->name('dashboard');
             Route::get('/users', [AdminController::class, 'users'])->name('users');
+            Route::delete('/users/{user}', [AdminController::class, 'destroyUser'])->name('users.destroy');
         });
 
     // ── Toutes les autres routes avec middleware onboarding ───────────
