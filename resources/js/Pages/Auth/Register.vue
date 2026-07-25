@@ -73,8 +73,9 @@ const submit = () => {
                     <div class="relative">
                         <input :type="showPassword ? 'text' : 'password'"
                                v-model="form.password"
+                               @change="form.password_confirmation = form.password"
                                placeholder="Minimum 8 caractères"
-                               required autocomplete="new-password"
+                               autocomplete="new-password"
                                class="w-full text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3 pr-12">
                         <button type="button"
                                 @click="showPassword = !showPassword"
@@ -95,7 +96,7 @@ const submit = () => {
                     <input :type="showPassword ? 'text' : 'password'"
                            v-model="form.password_confirmation"
                            placeholder="Répète ton mot de passe"
-                           required autocomplete="new-password"
+                           autocomplete="new-password"
                            class="w-full text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
                     <p v-if="form.errors.password_confirmation" class="text-[12px] text-tema-brick mt-1">
                         {{ form.errors.password_confirmation }}
