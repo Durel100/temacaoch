@@ -65,7 +65,12 @@ const progressPercent = computed(() => {
 const markPaidForm = useForm({});
 
 function markPaid(cycleId) {
-    const positionsCount = props.tontine.my_positions?.length ?? 1;
+    // Parser my_positions si c'est une string JSON
+    const rawPositions   = props.tontine.my_positions;
+    const myPositions    = Array.isArray(rawPositions)
+        ? rawPositions
+        : (typeof rawPositions === 'string' ? JSON.parse(rawPositions) : [props.tontine.my_position]);
+    const positionsCount = myPositions.length || 1;
     const perCycle       = props.tontine.contribution_amount ?? 0;
     const totalAmount    = perCycle * positionsCount;
     const fmtTotal       = new Intl.NumberFormat('fr-FR').format(Math.round(totalAmount));
@@ -127,7 +132,7 @@ function deleteTontine() {
                             {{ tontine.name }}
                         </h1>
                         <p class="text-[11px] text-[#1A2E2B]/40">
-                            {{ tontine.total_members }} {{ t('members_count') }} · {{ t('position') }} {{ tontine.my_position }}
+                            {{ tontine.total_members }} {{ t('members_count') }} · {{ t('position') }} {{ Array.isArray(tontine.my_positions) ? tontine.my_positions.join(', ') : (tontine.my_positions ? JSON.parse(tontine.my_positions).join(', ') : tontine.my_position) }}
                         </p>
                     </div>
                 </div>

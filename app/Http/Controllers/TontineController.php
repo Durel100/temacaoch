@@ -169,7 +169,12 @@ class TontineController extends Controller
         $group = $cycle->group;
 
         // Montant = cotisation × nombre de mes positions (si plusieurs noms)
-        $myPositionsCount = count($group->my_positions ?? [$group->my_position]);
+        // Parser my_positions si c'est une string JSON (cas rare selon DB)
+        $myPositionsRaw   = $group->my_positions;
+        $myPositionsArr   = is_array($myPositionsRaw)
+            ? $myPositionsRaw
+            : (is_string($myPositionsRaw) ? json_decode($myPositionsRaw, true) : null);
+        $myPositionsCount = !empty($myPositionsArr) ? count($myPositionsArr) : 1;
         $amountPerCycle   = $group->contribution_amount;
         $totalAmount      = $amountPerCycle * $myPositionsCount;
 
@@ -270,12 +275,14 @@ class TontineController extends Controller
     {
         if ($tontine->user_id !== $request->user()->id) abort(403);
 
-        // Supprimer les cycles et contributions associées
-        $tontine->cycles()->each(function ($cycle) {
-            $cycle->contribution()->delete();
-            $cycle->delete();
-        });
+        // Supprimer les contributions d'abord
+        $cycleIds = $tontine->cycles()->pluck('id');
+        TontineContribution::whereIn('tontine_cycle_id', $cycleIds)->delete();
 
+        // Supprimer les cycles
+        $tontine->cycles()->delete();
+
+        // Supprimer la tontine
         $tontine->delete();
 
         return redirect()->route('tontines.index')
