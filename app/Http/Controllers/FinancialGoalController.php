@@ -148,4 +148,21 @@ N'invente jamais de chiffres — base-toi uniquement sur les données fournies."
             return response()->json(['estimation' => null, 'message' => 'Service temporairement indisponible.']);
         }
     }
+
+    public function index(Request $request)
+    {
+        $goals = $request->user()->financialGoals()
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn ($g) => [
+                'id'               => $g->id,
+                'label'            => $g->label,
+                'target_amount'    => $g->target_amount,
+                'current_amount'   => $g->current_amount,
+                'target_date'      => $g->target_date,
+                'progress_percent' => $g->progress_percent,
+            ]);
+
+        return Inertia::render('Goals/Index', ['goals' => $goals]);
+    }
 }

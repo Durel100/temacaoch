@@ -8,10 +8,17 @@ use App\Models\Recommendation;
 class RecommendationEngineService
 {
     protected FinancialCalculatorService $calculator;
+    protected string $locale;
 
     public function __construct(private User $user)
     {
         $this->calculator = new FinancialCalculatorService($user);
+        $this->locale     = $user->locale ?? 'fr';
+    }
+
+    private function msg(string $fr, string $en): string
+    {
+        return $this->locale === 'en' ? $en : $fr;
     }
 
     protected function rules(): array
@@ -27,9 +34,11 @@ class RecommendationEngineService
                 'priority'  => 1,
                 'condition' => fn () => $this->calculator->getRealRemainingBudget() < 0,
                 'message'   => function () {
-                    $over = abs($this->calculator->getRealRemainingBudget());
-                    return "🔴 Budget dépassé de " . number_format($over, 0, ',', ' ')
-                        . " FCFA ce mois. Un découvert a été enregistré automatiquement.";
+                    $over = number_format(abs($this->calculator->getRealRemainingBudget()), 0, ',', ' ');
+                    return $this->msg(
+                        "🔴 Budget dépassé de {$over} FCFA ce mois. Un découvert a été enregistré automatiquement.",
+                        "🔴 Budget exceeded by {$over} FCFA this month. An overdraft has been recorded automatically."
+                    );
                 },
             ],
 
@@ -46,9 +55,11 @@ class RecommendationEngineService
                         ->where('remaining_amount', '>', 0)
                         ->orderByDesc('interest_rate')
                         ->first();
-                    return "💸 Dette à {$debt->interest_rate}% ({$debt->label}) : "
-                        . number_format($debt->remaining_amount, 0, ',', ' ')
-                        . " FCFA restants. Rembourse en priorité.";
+                    $amount = number_format($debt->remaining_amount, 0, ',', ' ');
+                    return $this->msg(
+                        "💸 Dette à {$debt->interest_rate}% ({$debt->label}) : {$amount} FCFA restants. Rembourse en priorité.",
+                        "💸 Debt at {$debt->interest_rate}% ({$debt->label}): {$amount} FCFA remaining. Repay first."
+                    );
                 },
             ],
 
@@ -58,7 +69,10 @@ class RecommendationEngineService
                 'condition' => fn () => count($this->calculator->getLateTontineContributions()) > 0,
                 'message'   => function () {
                     $count = count($this->calculator->getLateTontineContributions());
-                    return "⏰ {$count} cotisation(s) tontine en retard. Régularise rapidement pour ne pas perdre ta place.";
+                    return $this->msg(
+                        "⏰ {$count} cotisation(s) tontine en retard. Régularise rapidement pour ne pas perdre ta place.",
+                        "⏰ {$count} tontine contribution(s) overdue. Pay quickly to keep your spot."
+                    );
                 },
             ],
 
@@ -76,14 +90,13 @@ class RecommendationEngineService
                     return ($remaining / $base) * 100 < 20;
                 },
                 'message'   => function () {
-                    $remaining = $this->calculator->getRealRemainingBudget();
+                    $remaining = number_format($this->calculator->getRealRemainingBudget(), 0, ',', ' ');
                     $days      = $this->calculator->getDaysLeftInFinancialMonth();
-                    $perDay    = $days > 0 ? round($remaining / $days) : 0;
-                    return "⚠️ Il ne te reste que "
-                        . number_format($remaining, 0, ',', ' ')
-                        . " FCFA pour {$days} jours soit environ "
-                        . number_format($perDay, 0, ',', ' ')
-                        . " FCFA/jour.";
+                    $perDay    = $days > 0 ? number_format(round($this->calculator->getRealRemainingBudget() / $days), 0, ',', ' ') : 0;
+                    return $this->msg(
+                        "⚠️ Il ne te reste que {$remaining} FCFA pour {$days} jours soit environ {$perDay} FCFA/jour.",
+                        "⚠️ You only have {$remaining} FCFA left for {$days} days, about {$perDay} FCFA/day."
+                    );
                 },
             ],
 
@@ -92,10 +105,12 @@ class RecommendationEngineService
                 'priority'  => 2,
                 'condition' => fn () => count($this->calculator->getOverspendingCategories()) > 0,
                 'message'   => function () {
-                    $over = $this->calculator->getOverspendingCategories()[0];
-                    return "📈 {$over['category']} : "
-                        . number_format($over['current'], 0, ',', ' ')
-                        . " FCFA dépensés, {$over['percent_over']}% au-dessus de ta moyenne habituelle.";
+                    $over    = $this->calculator->getOverspendingCategories()[0];
+                    $current = number_format($over['current'], 0, ',', ' ');
+                    return $this->msg(
+                        "📈 {$over['category']} : {$current} FCFA dépensés, {$over['percent_over']}% au-dessus de ta moyenne habituelle.",
+                        "📈 {$over['category']}: {$current} FCFA spent, {$over['percent_over']}% above your usual average."
+                    );
                 },
             ],
 
@@ -107,24 +122,18 @@ class RecommendationEngineService
                 'id'        => 'big_income_debt_reminder',
                 'priority'  => 3,
                 'condition' => function () {
-                    // Grosse entrée ce mois (> 50% du revenu de référence)
-                    $monthIn   = $this->calculator->getCurrentMonthTransactionsIn();
-                    $baseline  = $this->calculator->getSafeIncomeBaseline();
-                    $hasDebts  = $this->user->debts()
-                        ->where('remaining_amount', '>', 0)
-                        ->exists();
+                    $monthIn  = $this->calculator->getCurrentMonthTransactionsIn();
+                    $baseline = $this->calculator->getSafeIncomeBaseline();
+                    $hasDebts = $this->user->debts()->where('remaining_amount', '>', 0)->exists();
                     return $monthIn > ($baseline * 0.5) && $hasDebts;
                 },
                 'message'   => function () {
-                    $totalDebt = $this->user->debts()
-                        ->where('remaining_amount', '>', 0)
-                        ->sum('remaining_amount');
-                    $monthIn   = $this->calculator->getCurrentMonthTransactionsIn();
-                    return "💰 Tu as reçu "
-                        . number_format($monthIn, 0, ',', ' ')
-                        . " FCFA ce mois. Tu as encore "
-                        . number_format($totalDebt, 0, ',', ' ')
-                        . " FCFA de dettes. C'est le bon moment pour rembourser.";
+                    $totalDebt = number_format($this->user->debts()->where('remaining_amount', '>', 0)->sum('remaining_amount'), 0, ',', ' ');
+                    $monthIn   = number_format($this->calculator->getCurrentMonthTransactionsIn(), 0, ',', ' ');
+                    return $this->msg(
+                        "💰 Tu as reçu {$monthIn} FCFA ce mois. Tu as encore {$totalDebt} FCFA de dettes. C'est le bon moment pour rembourser.",
+                        "💰 You received {$monthIn} FCFA this month. You still have {$totalDebt} FCFA in debt. A good time to repay."
+                    );
                 },
             ],
 
@@ -132,7 +141,6 @@ class RecommendationEngineService
                 'id'        => 'big_income_goals_reminder',
                 'priority'  => 3,
                 'condition' => function () {
-                    // Grosse entrée ce mois et des objectifs non atteints
                     $monthIn  = $this->calculator->getCurrentMonthTransactionsIn();
                     $baseline = $this->calculator->getSafeIncomeBaseline();
                     $hasGoals = $this->user->financialGoals()
@@ -146,10 +154,11 @@ class RecommendationEngineService
                         ->orderByRaw('(target_amount - current_amount) ASC')
                         ->first();
                     if (!$goal) return '';
-                    $remaining = $goal->target_amount - $goal->current_amount;
-                    return "🎯 Tu as reçu de l'argent ce mois ! Objectif \"{$goal->label}\" : il manque encore "
-                        . number_format($remaining, 0, ',', ' ')
-                        . " FCFA. C'est le moment d'épargner.";
+                    $missing = number_format($goal->target_amount - $goal->current_amount, 0, ',', ' ');
+                    return $this->msg(
+                        "🎯 Tu as reçu de l'argent ce mois ! Objectif \"{$goal->label}\" : il manque encore {$missing} FCFA. C'est le moment d'épargner.",
+                        "🎯 You received money this month! Goal \"{$goal->label}\": {$missing} FCFA left to go. Time to save."
+                    );
                 },
             ],
 
@@ -157,16 +166,13 @@ class RecommendationEngineService
                 'id'        => 'big_income_tontine_reminder',
                 'priority'  => 3,
                 'condition' => function () {
-                    // Grosse entrée ET cotisation tontine du mois pas encore payée
                     $monthIn  = $this->calculator->getCurrentMonthTransactionsIn();
                     $baseline = $this->calculator->getSafeIncomeBaseline();
                     if ($monthIn <= ($baseline * 0.5)) return false;
-
                     return $this->user->tontineGroups()
                         ->where('is_active', true)
                         ->get()
                         ->filter(function ($group) {
-                            // A-t-il une cotisation due ce mois non payée ?
                             return $group->cycles()
                                 ->whereMonth('scheduled_date', now()->month)
                                 ->whereYear('scheduled_date', now()->year)
@@ -177,7 +183,10 @@ class RecommendationEngineService
                         ->isNotEmpty();
                 },
                 'message'   => function () {
-                    return "🤝 Tu as reçu de l'argent ce mois. N'oublie pas tes cotisations tontine du mois !";
+                    return $this->msg(
+                        "🤝 Tu as reçu de l'argent ce mois. N'oublie pas tes cotisations tontine du mois !",
+                        "🤝 You received money this month. Don't forget your tontine contributions!"
+                    );
                 },
             ],
 
@@ -194,9 +203,15 @@ class RecommendationEngineService
                     $days   = $payout['days_until'];
                     $amount = number_format($payout['amount'], 0, ',', ' ');
                     if ($days === 0) {
-                        return "🎉 C'est aujourd'hui que tu reçois ta tontine : {$amount} FCFA ! Planifie bien son utilisation.";
+                        return $this->msg(
+                            "🎉 C'est aujourd'hui que tu reçois ta tontine : {$amount} FCFA ! Planifie bien son utilisation.",
+                            "🎉 Today is your tontine payout day: {$amount} FCFA! Plan how to use it wisely."
+                        );
                     }
-                    return "🔔 Réception tontine dans {$days} jour(s) : {$amount} FCFA. Réfléchis à comment l'utiliser.";
+                    return $this->msg(
+                        "🔔 Réception tontine dans {$days} jour(s) : {$amount} FCFA. Réfléchis à comment l'utiliser.",
+                        "🔔 Tontine payout in {$days} day(s): {$amount} FCFA. Think about how to use it."
+                    );
                 },
             ],
 
@@ -210,10 +225,12 @@ class RecommendationEngineService
                 },
                 'message'   => function () {
                     $payout    = $this->calculator->getUpcomingTontinePayout();
-                    $totalDebt = $this->user->debts()->where('remaining_amount', '>', 0)->sum('remaining_amount');
                     $amount    = number_format($payout['amount'], 0, ',', ' ');
-                    $debt      = number_format($totalDebt, 0, ',', ' ');
-                    return "💡 Ta tontine ({$amount} FCFA) arrive bientôt. Tu as {$debt} FCFA de dettes. Pense à en rembourser une partie.";
+                    $totalDebt = number_format($this->user->debts()->where('remaining_amount', '>', 0)->sum('remaining_amount'), 0, ',', ' ');
+                    return $this->msg(
+                        "💡 Ta tontine ({$amount} FCFA) arrive bientôt. Tu as {$totalDebt} FCFA de dettes. Pense à en rembourser une partie.",
+                        "💡 Your tontine ({$amount} FCFA) is coming soon. You have {$totalDebt} FCFA in debt. Consider repaying some."
+                    );
                 },
             ],
 
@@ -229,10 +246,7 @@ class RecommendationEngineService
                         ->where('label', 'like', '%urgence%')
                         ->orWhere('label', 'like', '%emergency%')
                         ->first();
-                    if (!$goal) {
-                        // Pas d'objectif urgence du tout
-                        return true;
-                    }
+                    if (!$goal) return true;
                     return $goal->current_amount < $this->calculator->getSafeIncomeBaseline();
                 },
                 'message'   => function () {
@@ -241,9 +255,11 @@ class RecommendationEngineService
                         ->where('label', 'like', '%urgence%')
                         ->orWhere('label', 'like', '%emergency%')
                         ->first();
-                    $current  = $goal?->current_amount ?? 0;
-                    $missing  = number_format($baseline - $current, 0, ',', ' ');
-                    return "🛡️ Fonds d'urgence insuffisant. Il te manque {$missing} FCFA pour avoir 1 mois de revenu en réserve.";
+                    $missing  = number_format($baseline - ($goal?->current_amount ?? 0), 0, ',', ' ');
+                    return $this->msg(
+                        "🛡️ Fonds d'urgence insuffisant. Il te manque {$missing} FCFA pour avoir 1 mois de revenu en réserve.",
+                        "🛡️ Emergency fund too low. You need {$missing} FCFA more to have 1 month of income in reserve."
+                    );
                 },
             ],
 
@@ -257,12 +273,14 @@ class RecommendationEngineService
                         ->isNotEmpty();
                 },
                 'message'   => function () {
-                    $goal = $this->user->financialGoals()
-                        ->get()
+                    $goal    = $this->user->financialGoals()->get()
                         ->filter(fn ($g) => $g->progress_percent >= 80 && $g->progress_percent < 100)
                         ->first();
                     $missing = number_format($goal->target_amount - $goal->current_amount, 0, ',', ' ');
-                    return "🎯 Objectif \"{$goal->label}\" à {$goal->progress_percent}% ! Plus que {$missing} FCFA. Tu y es presque !";
+                    return $this->msg(
+                        "🎯 Objectif \"{$goal->label}\" à {$goal->progress_percent}% ! Plus que {$missing} FCFA. Tu y es presque !",
+                        "🎯 Goal \"{$goal->label}\" at {$goal->progress_percent}%! Only {$missing} FCFA to go. Almost there!"
+                    );
                 },
             ],
 
@@ -270,17 +288,18 @@ class RecommendationEngineService
                 'id'        => 'goal_target_reached',
                 'priority'  => 5,
                 'condition' => function () {
-                    return $this->user->financialGoals()
-                        ->get()
+                    return $this->user->financialGoals()->get()
                         ->filter(fn ($g) => $g->progress_percent >= 100)
                         ->isNotEmpty();
                 },
                 'message'   => function () {
-                    $goal = $this->user->financialGoals()
-                        ->get()
+                    $goal = $this->user->financialGoals()->get()
                         ->filter(fn ($g) => $g->progress_percent >= 100)
                         ->first();
-                    return "🎉 Objectif \"{$goal->label}\" atteint ! Félicitations. Tu peux maintenant le clôturer ou en créer un nouveau.";
+                    return $this->msg(
+                        "🎉 Objectif \"{$goal->label}\" atteint ! Félicitations. Tu peux maintenant le clôturer ou en créer un nouveau.",
+                        "🎉 Goal \"{$goal->label}\" reached! Congratulations. You can close it or create a new one."
+                    );
                 },
             ],
 
@@ -300,9 +319,15 @@ class RecommendationEngineService
                     $remaining = $this->calculator->getRealRemainingBudget();
                     $amount    = number_format(abs($remaining), 0, ',', ' ');
                     if ($remaining >= 0) {
-                        return "📅 Fin de mois dans {$daysLeft} jour(s). Il te reste {$amount} FCFA. Bien joué !";
+                        return $this->msg(
+                            "📅 Fin de mois dans {$daysLeft} jour(s). Il te reste {$amount} FCFA. Bien joué !",
+                            "📅 End of month in {$daysLeft} day(s). You have {$amount} FCFA left. Well done!"
+                        );
                     }
-                    return "📅 Fin de mois dans {$daysLeft} jour(s). Budget dépassé de {$amount} FCFA. Fais attention.";
+                    return $this->msg(
+                        "📅 Fin de mois dans {$daysLeft} jour(s). Budget dépassé de {$amount} FCFA. Fais attention.",
+                        "📅 End of month in {$daysLeft} day(s). Budget exceeded by {$amount} FCFA. Be careful."
+                    );
                 },
             ],
 
@@ -310,11 +335,16 @@ class RecommendationEngineService
                 'id'        => 'debt_all_paid',
                 'priority'  => 6,
                 'condition' => function () {
-                    $hadDebts   = $this->user->debts()->exists();
+                    $hadDebts    = $this->user->debts()->exists();
                     $activeDebts = $this->user->debts()->where('remaining_amount', '>', 0)->exists();
                     return $hadDebts && !$activeDebts;
                 },
-                'message'   => fn () => "🎊 Toutes tes dettes sont remboursées ! C'est une excellente nouvelle. Pense maintenant à épargner.",
+                'message'   => function () {
+                    return $this->msg(
+                        "🎊 Toutes tes dettes sont remboursées ! C'est une excellente nouvelle. Pense maintenant à épargner.",
+                        "🎊 All your debts are paid off! Excellent news. Now think about saving."
+                    );
+                },
             ],
 
             [
@@ -327,9 +357,11 @@ class RecommendationEngineService
                     $total   = $this->user->dependents()->get()->sum(fn ($d) => $d->monthly_allowance_cost);
                     $income  = $this->calculator->getSafeIncomeBaseline();
                     $percent = $income > 0 ? round(($total / $income) * 100) : 0;
-                    return "👨‍👩‍👧 Argent de poche famille : "
-                        . number_format($total, 0, ',', ' ')
-                        . " FCFA/mois ({$percent}% de ton revenu).";
+                    $fmt     = number_format($total, 0, ',', ' ');
+                    return $this->msg(
+                        "👨‍👩‍👧 Argent de poche famille : {$fmt} FCFA/mois ({$percent}% de ton revenu).",
+                        "👨‍👩‍👧 Family allowances: {$fmt} FCFA/month ({$percent}% of your income)."
+                    );
                 },
             ],
 
@@ -353,7 +385,6 @@ class RecommendationEngineService
                     }
                 }
             } catch (\Exception $e) {
-                // Silencieux — une règle cassée ne doit pas bloquer les autres
                 \Log::warning("RecommendationEngine rule {$rule['id']} failed: " . $e->getMessage());
             }
         }

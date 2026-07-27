@@ -14,9 +14,6 @@ use Inertia\Inertia;
 
 class TontineController extends Controller
 {
-    /**
-     * Liste de toutes les tontines de l'utilisateur
-     */
     public function index(Request $request)
     {
         $user = $request->user();
@@ -29,24 +26,24 @@ class TontineController extends Controller
             ->orderByDesc('created_at')
             ->get()
             ->map(function ($tontine) {
-                $nextCycle = $tontine->nextCycle();
+                $nextCycle     = $tontine->nextCycle();
                 $myPayoutCycle = $tontine->myPayoutCycle();
 
                 return [
-                    'id' => $tontine->id,
-                    'name' => $tontine->name,
-                    'contribution_amount' => $tontine->contribution_amount,
-                    'frequency' => $tontine->frequency,
-                    'total_members' => $tontine->total_members,
-                    'my_position' => $tontine->my_position,
-                    'start_date' => $tontine->start_date,
-                    'is_active' => $tontine->is_active,
-                    'cycles' => $tontine->cycles,
-                    'next_cycle' => $nextCycle,
-                    'my_payout_cycle' => $myPayoutCycle,
-                    'payout_amount' => $tontine->contribution_amount * $tontine->total_members,
+                    'id'                       => $tontine->id,
+                    'name'                     => $tontine->name,
+                    'contribution_amount'      => $tontine->contribution_amount,
+                    'frequency'                => $tontine->frequency,
+                    'total_members'            => $tontine->total_members,
+                    'my_position'              => $tontine->my_position,
+                    'start_date'               => $tontine->start_date,
+                    'is_active'                => $tontine->is_active,
+                    'cycles'                   => $tontine->cycles,
+                    'next_cycle'               => $nextCycle,
+                    'my_payout_cycle'          => $myPayoutCycle,
+                    'payout_amount'            => $tontine->contribution_amount * $tontine->total_members,
                     'late_contributions_count' => $tontine->cycles()
-                        ->whereHas('contribution', fn($q) => $q->where('status', 'late'))
+                        ->whereHas('contribution', fn ($q) => $q->where('status', 'late'))
                         ->count(),
                 ];
             });
@@ -56,17 +53,11 @@ class TontineController extends Controller
         ]);
     }
 
-    /**
-     * Formulaire de création
-     */
     public function create()
     {
         return Inertia::render('Tontines/Create');
     }
 
-    /**
-     * Enregistrer une nouvelle tontine
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -76,108 +67,103 @@ class TontineController extends Controller
             'total_members'       => 'required|integer|min:2|max:50',
             'my_positions'        => 'required|array|min:1',
             'my_positions.*'      => 'required|integer|min:1',
-            'start_date' => 'required|date',
-            'cycle_months'   => 'nullable|integer|min:1|max:24',
-            'frequency_type' => 'required|in:days,months',
+            'start_date'          => 'required|date',
+            'prepaid_cycles'      => 'nullable|array',
+            'prepaid_cycles.*'    => 'integer|min:1',
+            'cycle_months'        => 'nullable|integer|min:1|max:24',
+            'frequency_type'      => 'required|in:days,months',
         ]);
 
-        // Vérifier que toutes les positions sont valides
         foreach ($validated['my_positions'] as $pos) {
             if ($pos > $validated['total_members']) {
-                return back()->withErrors([
-                    'my_positions' => "La position {$pos} dépasse le nombre de membres.",
-                ]);
+                return back()->withErrors(['my_positions' => "La position {$pos} dépasse le nombre de membres."]);
             }
         }
 
-        // Vérifier doublons de positions
         if (count($validated['my_positions']) !== count(array_unique($validated['my_positions']))) {
-            return back()->withErrors([
-                'my_positions' => 'Tu as des positions en double.',
-            ]);
+            return back()->withErrors(['my_positions' => 'Tu as des positions en double.']);
         }
 
-        $activeTontinesCount = $request->user()
-            ->tontineGroups()
-            ->where('is_active', true)
-            ->count();
-
+        $activeTontinesCount = $request->user()->tontineGroups()->where('is_active', true)->count();
         if ($activeTontinesCount >= 3) {
-            return back()->withErrors([
-                'name' => 'Tu ne peux pas avoir plus de 3 tontines actives simultanément.',
-            ]);
+            return back()->withErrors(['name' => 'Tu ne peux pas avoir plus de 3 tontines actives simultanément.']);
         }
 
         $tontine = $request->user()->tontineGroups()->create([
             'name'                => $validated['name'],
             'contribution_amount' => $validated['contribution_amount'],
-            'cycle_days'          => $validated['cycle_days'],
+            'cycle_days'          => $validated['frequency_type'] === 'days' ? $validated['cycle_days'] : null,
+            'cycle_months'        => $validated['frequency_type'] === 'months' ? $validated['cycle_months'] : null,
+            'frequency_type'      => $validated['frequency_type'],
             'total_members'       => $validated['total_members'],
-            'my_position'         => $validated['my_positions'][0], // compatibilité
+            'my_position'         => $validated['my_positions'][0],
             'my_positions'        => $validated['my_positions'],
             'start_date'          => $validated['start_date'],
             'is_active'           => true,
-            'cycle_months'   => $validated['cycle_months'],
-            'frequency_type' => $validated['frequency_type'],
         ]);
 
         $tontine->generateCycles();
 
-        // Marquer automatiquement les cycles passés lors d'une création antidatée
-        $today = now()->startOfDay();
-        $tontine->cycles()->each(function ($cycle) use ($today) {
+        // ── Marquer automatiquement les cycles passés ─────────────────
+        $today          = now()->startOfDay();
+        $prepaidCycles  = $validated['prepaid_cycles'] ?? [];
+
+        $tontine->cycles()->each(function ($cycle) use ($today, $prepaidCycles) {
             $cycleDate = \Carbon\Carbon::parse($cycle->scheduled_date)->startOfDay();
 
             if ($cycleDate->lt($today)) {
+                // Cycles passés
                 if ($cycle->is_my_turn) {
-                    // Mon tour de réception déjà passé → completed
+                    // Mon tour de réception passé → completed
                     $cycle->update(['status' => 'completed']);
                 } else {
-                    // Cotisation déjà due → créer contribution late
+                    // Cotisation passée → marquée payée sans transaction
                     if (!$cycle->contribution) {
                         $cycle->contribution()->create([
                             'amount_due'  => $cycle->group->contribution_amount,
-                            'amount_paid' => 0,
-                            'status'      => 'late',
+                            'amount_paid' => $cycle->group->contribution_amount,
+                            'status'      => 'paid',
+                            'paid_date'   => $cycle->scheduled_date,
                         ]);
                     }
+                }
+            } elseif (in_array($cycle->cycle_number, $prepaidCycles)) {
+                // Cycles futurs prépayés déclarés par l'utilisateur
+                // → marqués payés SANS créer de transaction (l'argent est déjà sorti)
+                if (!$cycle->contribution) {
+                    $cycle->contribution()->create([
+                        'amount_due'  => $cycle->group->contribution_amount,
+                        'amount_paid' => $cycle->group->contribution_amount,
+                        'status'      => 'paid',
+                        'paid_date'   => now()->toDateString(),
+                    ]);
                 }
             }
         });
 
         return redirect()->route('tontines.show', $tontine->id)
-            ->with('success', 'Tontine créée.');
+            ->with('success', 'Tontine créée. Les cycles passés et prépayés ont été marqués automatiquement.');
     }
 
-    /**
-     * Détail d'une tontine
-     */
     public function show(Request $request, TontineGroup $tontine)
     {
-        if ($tontine->user_id !== $request->user()->id) {
-            abort(403);
-        }
+        if ($tontine->user_id !== $request->user()->id) abort(403);
 
         $tontine->load(['cycles' => function ($q) {
             $q->orderBy('cycle_number');
         }, 'cycles.contribution']);
 
         return Inertia::render('Tontines/Show', [
-            'tontine' => $tontine,
-            'payoutAmount' => $tontine->contribution_amount * $tontine->total_members,
+            'tontine'       => $tontine,
+            'payoutAmount'  => $tontine->contribution_amount * $tontine->total_members,
             'myPayoutCycle' => $tontine->myPayoutCycle(),
-            'nextCycle' => $tontine->nextCycle(),
+            'nextCycle'     => $tontine->nextCycle(),
         ]);
     }
 
-    /**
-     * Marquer une cotisation comme payée
-     */
     public function markPaid(Request $request, TontineCycle $cycle)
     {
-        if ($cycle->group->user_id !== $request->user()->id) {
-            abort(403);
-        }
+        if ($cycle->group->user_id !== $request->user()->id) abort(403);
 
         $user   = $request->user();
         $amount = $cycle->group->contribution_amount;
@@ -194,7 +180,6 @@ class TontineController extends Controller
 
         $contribution->markAsPaid();
 
-        // Créer une transaction "out" pour débiter le budget
         $category = Category::firstOrCreate(
             ['name' => 'Tontine', 'user_id' => null],
             [
@@ -215,10 +200,8 @@ class TontineController extends Controller
             'note'          => 'Cotisation tontine : ' . $cycle->group->name,
         ]);
 
-        // Synchroniser le découvert
         $this->syncOverdraftDebt($user);
 
-        // Préparer le prochain cycle
         $nextCycle = $cycle->group->cycles()
             ->where('cycle_number', $cycle->cycle_number + 1)
             ->first();
@@ -234,9 +217,62 @@ class TontineController extends Controller
         return back()->with('success', 'Cotisation enregistrée — déduite de ton budget.');
     }
 
-    /**
-     * Synchronise la dette de découvert après une dépense
-     */
+    public function markReceived(Request $request, TontineCycle $cycle)
+    {
+        if ($cycle->group->user_id !== $request->user()->id) abort(403);
+        if (!$cycle->is_my_turn) abort(403, "Ce n'est pas ton tour de réception.");
+
+        $cycle->update(['status' => 'completed']);
+
+        return back()->with('success', 'Réception enregistrée. Félicitations ! 🎉');
+    }
+
+    public function deactivate(Request $request, TontineGroup $tontine)
+    {
+        if ($tontine->user_id !== $request->user()->id) abort(403);
+
+        $tontine->update(['is_active' => false]);
+
+        return redirect()->route('tontines.index')
+            ->with('success', 'Tontine désactivée.');
+    }
+
+    // ── NOUVEAU : Réactiver une tontine ──────────────────────────────
+    public function reactivate(Request $request, TontineGroup $tontine)
+    {
+        if ($tontine->user_id !== $request->user()->id) abort(403);
+
+        $activeTontinesCount = $request->user()
+            ->tontineGroups()
+            ->where('is_active', true)
+            ->count();
+
+        if ($activeTontinesCount >= 3) {
+            return back()->withErrors(['error' => 'Tu ne peux pas avoir plus de 3 tontines actives simultanément.']);
+        }
+
+        $tontine->update(['is_active' => true]);
+
+        return back()->with('success', 'Tontine réactivée.');
+    }
+
+    // ── NOUVEAU : Supprimer une tontine ──────────────────────────────
+    public function destroy(Request $request, TontineGroup $tontine)
+    {
+        if ($tontine->user_id !== $request->user()->id) abort(403);
+
+        // Supprimer les cycles et contributions associées
+        $tontine->cycles()->each(function ($cycle) {
+            $cycle->contribution()->delete();
+            $cycle->delete();
+        });
+
+        $tontine->delete();
+
+        return redirect()->route('tontines.index')
+            ->with('success', 'Tontine supprimée.');
+    }
+
     private function syncOverdraftDebt($user): void
     {
         $user->load([
@@ -273,38 +309,5 @@ class TontineController extends Controller
                 'remaining_amount' => $overdraftAmount,
             ]);
         }
-    }
-
-    /**
-     * Marquer la réception de la tontine (quand c'est mon tour)
-     */
-    public function markReceived(Request $request, TontineCycle $cycle)
-    {
-        if ($cycle->group->user_id !== $request->user()->id) {
-            abort(403);
-        }
-
-        if (!$cycle->is_my_turn) {
-            abort(403, 'Ce n\'est pas ton tour de réception.');
-        }
-
-        $cycle->update(['status' => 'completed']);
-
-        return back()->with('success', 'Réception enregistrée. Félicitations ! 🎉');
-    }
-
-    /**
-     * Désactiver une tontine (pas de suppression — on garde l'historique)
-     */
-    public function deactivate(Request $request, TontineGroup $tontine)
-    {
-        if ($tontine->user_id !== $request->user()->id) {
-            abort(403);
-        }
-
-        $tontine->update(['is_active' => false]);
-
-        return redirect()->route('tontines.index')
-            ->with('success', 'Tontine désactivée.');
     }
 }

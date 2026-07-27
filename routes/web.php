@@ -91,6 +91,7 @@ Route::middleware('auth')->group(function () {
             Route::patch('/charges/{charge}/toggle', [FinanceController::class, 'toggleCharge'])->name('charges.toggle');
             Route::delete('/charges/{charge}',       [FinanceController::class, 'destroyCharge'])->name('charges.destroy');
             Route::post('/charges/{charge}/pay', [FinanceController::class, 'payCharge'])->name('charges.pay');
+            Route::get('/goals', [FinancialGoalController::class, 'index'])->name('goals.index');
         });
 
         // ── Objectifs ───────────────────────────────────────────────
@@ -117,6 +118,8 @@ Route::middleware('auth')->group(function () {
             Route::post('/cycles/{cycle}/mark-paid',     [TontineController::class, 'markPaid'])->name('cycles.mark-paid');
             Route::post('/cycles/{cycle}/mark-received', [TontineController::class, 'markReceived'])->name('cycles.mark-received');
             Route::patch('/{tontine}/deactivate',        [TontineController::class, 'deactivate'])->name('deactivate');
+            Route::patch('/{tontine}/reactivate', [TontineController::class, 'reactivate'])->name('reactivate');
+            Route::delete('/{tontine}',           [TontineController::class, 'destroy'])->name('destroy');
         });
 
         // ── Stats ────────────────────────────────────────────────────

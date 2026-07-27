@@ -80,10 +80,10 @@ const healthCriteria = computed(() => [
 const showBudgetDetail = ref(false);
 
 const spendingPercent = computed(() => {
+    // Basé sur realRemaining vs resteAVivre pour refléter les vraies transactions
     if (!props.resteAVivre) return 0;
-    return Math.min(100, Math.round(
-        ((props.variableSpending + (props.fixedChargesSurplus ?? 0)) / props.resteAVivre) * 100
-    ));
+    const spent = props.resteAVivre - props.realRemaining;
+    return Math.min(100, Math.max(0, Math.round((spent / props.resteAVivre) * 100)));
 });
 
 const budgetStatusColor = computed(() => {
@@ -332,16 +332,19 @@ function translateCategory(name) {
                             </div>
 
                             <!-- Panel épargne -->
-                            <div v-if="addingProgressTo === goal.id" class="mt-2 flex gap-2">
-                                <input type="number"
-                                       v-model.number="progressForm.amount"
-                                       :placeholder="t('amount_saved_ph')"
-                                       min="1"
-                                       class="flex-1 text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2">
+                            <div v-if="addingProgressTo === goal.id" class="mt-2 space-y-2">
+                                <div class="relative">
+                                    <input type="number"
+                                           v-model.number="progressForm.amount"
+                                           :placeholder="t('amount_saved_ph')"
+                                           min="1"
+                                           class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5 pr-16">
+                                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-tema-dark/40">FCFA</span>
+                                </div>
                                 <button @click="submitProgress(goal.id)"
                                         :disabled="!progressForm.amount || progressForm.processing"
-                                        class="bg-tema-green text-white text-[13px] font-semibold px-3 rounded-xl disabled:opacity-40 hover:bg-tema-green-light transition-all">
-                                    OK
+                                        class="w-full bg-tema-green text-white text-[13px] font-semibold py-2.5 rounded-xl disabled:opacity-40 hover:bg-tema-green-light transition-all">
+                                    {{ progressForm.processing ? t('saving') : t('goal_save_btn') }}
                                 </button>
                             </div>
 
@@ -422,10 +425,17 @@ function translateCategory(name) {
                             {{ goals.length }} {{ t('in_progress') }}
                         </p>
                     </div>
-                    <button @click="showGoalForm = !showGoalForm"
-                            class="text-[12px] bg-tema-green/8 text-tema-green font-semibold px-3 py-1.5 rounded-xl hover:bg-tema-green/15 transition-all">
-                        {{ t('new') }}
-                    </button>
+                    <div class="flex gap-2">
+                        <button v-if="goals.length > 0"
+                                @click="showGoalForm = false; router.get(route('goals.index'))"
+                                class="text-[12px] text-tema-dark/50 font-semibold px-3 py-1.5 rounded-xl hover:bg-[#1A2E2B]/5 transition-all">
+                            {{ t('see_all') }}
+                        </button>
+                        <button @click="showGoalForm = !showGoalForm"
+                                class="text-[12px] bg-tema-green/8 text-tema-green font-semibold px-3 py-1.5 rounded-xl hover:bg-tema-green/15 transition-all">
+                            {{ t('new') }}
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Formulaire -->

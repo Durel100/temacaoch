@@ -13,10 +13,11 @@ const form = useForm({
     contribution_amount: null,
     cycle_days:          null,
     cycle_months:        null,
-    frequency_type:      'days', // 'days' ou 'months'
+    frequency_type:      'days',
     total_members:       null,
     my_positions:        [],
     start_date:          '',
+    prepaid_cycles:      [], // cycles futurs déjà payés avant TemaCoach
 });
 
 function togglePosition(pos) {
@@ -33,9 +34,56 @@ function isMyPosition(pos) {
     return form.my_positions.includes(pos);
 }
 
+function togglePrepaid(cycleNumber) {
+    const idx = form.prepaid_cycles.indexOf(cycleNumber);
+    if (idx === -1) {
+        form.prepaid_cycles.push(cycleNumber);
+    } else {
+        form.prepaid_cycles.splice(idx, 1);
+    }
+}
+
+function isPrepaid(cycleNumber) {
+    return form.prepaid_cycles.includes(cycleNumber);
+}
+
 const availablePositions = computed(() => {
     if (!form.total_members || form.total_members < 2) return [];
     return Array.from({ length: form.total_members }, (_, i) => i + 1);
+});
+
+// Cycles futurs (non passés) et non dans mes positions de réception
+const futureCyclesForPrepay = computed(() => {
+    if (!form.start_date || !form.total_members) return [];
+    if (form.frequency_type === 'months' && !form.cycle_months) return [];
+    if (form.frequency_type === 'days' && !form.cycle_days) return [];
+
+    const today   = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cycles  = [];
+
+    for (let i = 1; i <= form.total_members; i++) {
+        const date = new Date(form.start_date);
+        if (form.frequency_type === 'months') {
+            date.setMonth(date.getMonth() + (i - 1) * form.cycle_months);
+        } else {
+            date.setDate(date.getDate() + (i - 1) * form.cycle_days);
+        }
+
+        // Garder uniquement les cycles futurs et non-mes positions de réception
+        if (date > today && !form.my_positions.includes(i)) {
+            cycles.push({
+                number: i,
+                date:   date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }),
+            });
+        }
+    }
+    return cycles;
+});
+
+const isBackdated = computed(() => {
+    if (!form.start_date) return false;
+    return new Date(form.start_date) < new Date();
 });
 
 const totalPayoutPreview = computed(() => {
@@ -116,9 +164,7 @@ function submit() {
         <div class="sticky top-0 z-50 bg-white border-b border-[#1A2E2B]/8" style="padding-top: env(safe-area-inset-top)">
             <div class="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
                 <button @click="router.get(route('tontines.index'))"
-                        class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">
-                    ←
-                </button>
+                        class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">←</button>
                 <h1 class="font-display text-[18px] font-semibold text-[#1A2E2B]">
                     {{ t('new_tontine_title') }}
                 </h1>
@@ -132,13 +178,9 @@ function submit() {
                 <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">
                     {{ t('tontine_name_label') }}
                 </p>
-                <input type="text"
-                       v-model="form.name"
-                       :placeholder="t('tontine_name_ph')"
+                <input type="text" v-model="form.name" :placeholder="t('tontine_name_ph')"
                        class="w-full text-[14px] font-medium rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
-                <p v-if="form.errors.name" class="text-[12px] text-tema-brick mt-1">
-                    {{ form.errors.name }}
-                </p>
+                <p v-if="form.errors.name" class="text-[12px] text-tema-brick mt-1">{{ form.errors.name }}</p>
             </div>
 
             <!-- Cycle -->
@@ -147,25 +189,20 @@ function submit() {
                     {{ t('tontine_cycle_label') }}
                 </p>
                 <p class="text-[12px] text-[#1A2E2B]/50 mb-3">
-                     {{ form.frequency_type === 'months' ? t('tontine_cycle_desc_months') : t('tontine_cycle_desc') }}
+                    {{ form.frequency_type === 'months' ? t('tontine_cycle_desc_months') : t('tontine_cycle_desc') }}
                 </p>
 
-                <!-- Toggle jours / mois -->
                 <div class="flex bg-[#FAF6F0] rounded-xl p-1 mb-4">
                     <button type="button"
                             @click="form.frequency_type = 'days'; form.cycle_months = null"
                             class="flex-1 py-2 text-[13px] font-semibold rounded-lg transition-all"
-                            :class="form.frequency_type === 'days'
-                                ? 'bg-white text-tema-green shadow-sm'
-                                : 'text-[#1A2E2B]/50 hover:text-[#1A2E2B]'">
+                            :class="form.frequency_type === 'days' ? 'bg-white text-tema-green shadow-sm' : 'text-[#1A2E2B]/50'">
                         {{ t('days_label') }}
                     </button>
                     <button type="button"
                             @click="form.frequency_type = 'months'; form.cycle_days = null"
                             class="flex-1 py-2 text-[13px] font-semibold rounded-lg transition-all"
-                            :class="form.frequency_type === 'months'
-                                ? 'bg-white text-tema-green shadow-sm'
-                                : 'text-[#1A2E2B]/50 hover:text-[#1A2E2B]'">
+                            :class="form.frequency_type === 'months' ? 'bg-white text-tema-green shadow-sm' : 'text-[#1A2E2B]/50'">
                         {{ t('months') }}
                     </button>
                 </div>
@@ -173,21 +210,18 @@ function submit() {
                 <!-- Options jours -->
                 <div v-if="form.frequency_type === 'days'">
                     <div class="flex flex-wrap gap-2 mb-3">
-                        <button v-for="days in commonCycles" :key="days"
-                                type="button"
+                        <button v-for="days in commonCycles" :key="days" type="button"
                                 @click="form.cycle_days = days"
                                 class="px-3 py-2 rounded-full border-[1.5px] text-[12px] font-medium transition-all"
                                 :class="form.cycle_days === days
                                     ? 'border-tema-green bg-tema-green/8 text-tema-green'
-                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40 hover:text-tema-green'">
+                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40'">
                             {{ days }} {{ t('days_label') }}
                         </button>
                     </div>
                     <div class="flex items-center gap-3">
-                        <input type="number"
-                               v-model.number="form.cycle_days"
-                               :placeholder="t('tontine_custom')"
-                               min="1" max="365"
+                        <input type="number" v-model.number="form.cycle_days"
+                               :placeholder="t('tontine_custom')" min="1" max="365"
                                class="flex-1 text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
                         <span class="text-[13px] text-[#1A2E2B]/50 flex-shrink-0">{{ t('days_label') }}</span>
                     </div>
@@ -196,138 +230,152 @@ function submit() {
                 <!-- Options mois -->
                 <div v-if="form.frequency_type === 'months'">
                     <p class="text-[12px] text-tema-green/70 bg-tema-green/8 rounded-xl px-3 py-2 mb-3">
-                        ✓ Les dates seront calculées exactement mois par mois (1 mois = 1er au 1er, etc.)
+                        ✓ Les dates seront calculées exactement mois par mois
                     </p>
                     <div class="flex flex-wrap gap-2 mb-3">
-                        <button v-for="m in commonMonths" :key="m"
-                                type="button"
+                        <button v-for="m in commonMonths" :key="m" type="button"
                                 @click="form.cycle_months = m"
                                 class="px-3 py-2 rounded-full border-[1.5px] text-[12px] font-medium transition-all"
                                 :class="form.cycle_months === m
                                     ? 'border-tema-green bg-tema-green/8 text-tema-green'
-                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40 hover:text-tema-green'">
+                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/60 hover:border-tema-green/40'">
                             {{ m }} {{ t('months') }}
                         </button>
                     </div>
                     <div class="flex items-center gap-3">
-                        <input type="number"
-                               v-model.number="form.cycle_months"
-                               placeholder="Ex : 2"
-                               min="1" max="24"
+                        <input type="number" v-model.number="form.cycle_months"
+                               placeholder="Ex : 2" min="1" max="24"
                                class="flex-1 text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
                         <span class="text-[13px] text-[#1A2E2B]/50 flex-shrink-0">{{ t('months') }}</span>
                     </div>
                 </div>
 
-                <p v-if="form.errors.cycle_days || form.errors.cycle_months"
-                   class="text-[12px] text-tema-brick mt-1">
+                <p v-if="form.errors.cycle_days || form.errors.cycle_months" class="text-[12px] text-tema-brick mt-1">
                     {{ form.errors.cycle_days || form.errors.cycle_months }}
                 </p>
             </div>
 
             <!-- Cotisation -->
             <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
-                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">
-                    {{ t('tontine_amount') }}
-                </p>
+                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">{{ t('tontine_amount') }}</p>
                 <div class="relative">
-                    <input type="number"
-                           v-model.number="form.contribution_amount"
-                           placeholder="Ex : 10 000"
-                           min="500"
+                    <input type="number" v-model.number="form.contribution_amount"
+                           placeholder="Ex : 10 000" min="500"
                            class="w-full text-[20px] font-semibold rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3.5 pr-16">
-                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[13px] text-[#1A2E2B]/40 font-medium">
-                        FCFA
-                    </span>
+                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[13px] text-[#1A2E2B]/40 font-medium">FCFA</span>
                 </div>
-                <p v-if="form.errors.contribution_amount" class="text-[12px] text-tema-brick mt-1">
-                    {{ form.errors.contribution_amount }}
-                </p>
+                <p v-if="form.errors.contribution_amount" class="text-[12px] text-tema-brick mt-1">{{ form.errors.contribution_amount }}</p>
             </div>
 
             <!-- Nombre de membres -->
             <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
-                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">
-                    {{ t('tontine_members') }}
-                </p>
-                <input type="number"
-                       v-model.number="form.total_members"
-                       placeholder="Ex : 10"
-                       min="2" max="50"
+                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">{{ t('tontine_members') }}</p>
+                <input type="number" v-model.number="form.total_members"
+                       placeholder="Ex : 10" min="2" max="50"
                        class="w-full text-[17px] font-semibold rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
-                <p v-if="form.errors.total_members" class="text-[12px] text-tema-brick mt-1">
-                    {{ form.errors.total_members }}
-                </p>
+                <p v-if="form.errors.total_members" class="text-[12px] text-tema-brick mt-1">{{ form.errors.total_members }}</p>
             </div>
 
             <!-- Mes positions -->
-            <div v-if="availablePositions.length > 0"
-                 class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
-                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-1">
-                    {{ t('tontine_positions') }}
-                </p>
-                <p class="text-[12px] text-[#1A2E2B]/50 mb-4">
-                    {{ t('tontine_pos_desc') }}
-                </p>
+            <div v-if="availablePositions.length > 0" class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
+                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-1">{{ t('tontine_positions') }}</p>
+                <p class="text-[12px] text-[#1A2E2B]/50 mb-4">{{ t('tontine_pos_desc') }}</p>
 
                 <div class="grid grid-cols-5 gap-2 mb-3">
-                    <button v-for="pos in availablePositions"
-                            :key="pos"
-                            type="button"
+                    <button v-for="pos in availablePositions" :key="pos" type="button"
                             @click="togglePosition(pos)"
                             class="aspect-square rounded-xl border-[1.5px] flex items-center justify-center text-[13px] font-semibold transition-all"
                             :class="isMyPosition(pos)
-                                ? 'border-tema-green bg-tema-green text-white shadow-sm shadow-tema-green/30'
-                                : 'border-[#1A2E2B]/10 text-[#1A2E2B]/50 hover:border-tema-green/40 hover:text-tema-green'">
+                                ? 'border-tema-green bg-tema-green text-white'
+                                : 'border-[#1A2E2B]/10 text-[#1A2E2B]/50 hover:border-tema-green/40'">
                         {{ pos }}
                     </button>
                 </div>
 
-                <div v-if="form.my_positions.length > 0"
-                     class="bg-tema-green/8 rounded-xl px-3 py-2.5">
+                <div v-if="form.my_positions.length > 0" class="bg-tema-green/8 rounded-xl px-3 py-2.5">
                     <p class="text-[12px] text-tema-green font-semibold">
                         {{ form.my_positions.length === 1
                             ? `${t('tontine_pos_one')} ${form.my_positions[0]}`
                             : `${t('tontine_pos_sel')} ${form.my_positions.join(', ')}` }}
                     </p>
-                    <p class="text-[11px] text-tema-green/70 mt-0.5">
-                        {{ form.my_positions.length }} {{ t('tontine_receptions') }}
-                    </p>
+                    <p class="text-[11px] text-tema-green/70 mt-0.5">{{ form.my_positions.length }} {{ t('tontine_receptions') }}</p>
                 </div>
 
-                <p v-if="form.errors.my_positions" class="text-[12px] text-tema-brick mt-2">
-                    {{ form.errors.my_positions }}
-                </p>
+                <p v-if="form.errors.my_positions" class="text-[12px] text-tema-brick mt-2">{{ form.errors.my_positions }}</p>
             </div>
 
             <!-- Date de départ -->
             <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
-                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-1">
-                    {{ t('tontine_start') }}
-                </p>
-                <p class="text-[12px] text-[#1A2E2B]/50 mb-3">
-                    {{ t('tontine_start_desc') }}
-                </p>
-                <input type="date"
-                       v-model="form.start_date"
+                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-1">{{ t('tontine_start') }}</p>
+                <p class="text-[12px] text-[#1A2E2B]/50 mb-3">{{ t('tontine_start_desc') }}</p>
+                <input type="date" v-model="form.start_date"
                        class="w-full text-[14px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-3">
-                <p v-if="form.errors.start_date" class="text-[12px] text-tema-brick mt-1">
-                    {{ form.errors.start_date }}
-                </p>
+                <p v-if="form.errors.start_date" class="text-[12px] text-tema-brick mt-1">{{ form.errors.start_date }}</p>
+            </div>
+
+            <!-- ── CYCLES PRÉPAYÉS ─────────────────────────────────────── -->
+            <!-- S'affiche si date passée ET des cycles futurs existent -->
+            <div v-if="isBackdated && futureCyclesForPrepay.length > 0"
+                 class="bg-white rounded-2xl border border-tema-ocre/30 p-5">
+                <div class="flex items-start gap-2 mb-3">
+                    <span class="text-lg mt-0.5">💡</span>
+                    <div>
+                        <p class="text-[13px] font-semibold text-[#1A2E2B]">
+                            {{ t('prepaid_cycles_title') }}
+                        </p>
+                        <p class="text-[12px] text-[#1A2E2B]/50 mt-0.5">
+                            {{ t('prepaid_cycles_desc') }}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <button v-for="cycle in futureCyclesForPrepay" :key="cycle.number"
+                            type="button"
+                            @click="togglePrepaid(cycle.number)"
+                            class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border-[1.5px] transition-all"
+                            :class="isPrepaid(cycle.number)
+                                ? 'border-tema-green bg-tema-green/8'
+                                : 'border-[#1A2E2B]/10 hover:border-[#1A2E2B]/20'">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold flex-shrink-0"
+                                  :class="isPrepaid(cycle.number) ? 'bg-tema-green text-white' : 'bg-[#1A2E2B]/8 text-[#1A2E2B]/50'">
+                                {{ cycle.number }}
+                            </span>
+                            <span class="text-[13px]" :class="isPrepaid(cycle.number) ? 'text-tema-green font-semibold' : 'text-[#1A2E2B]/70'">
+                                {{ cycle.date }}
+                            </span>
+                        </div>
+                        <span v-if="isPrepaid(cycle.number)" class="text-[11px] text-tema-green font-semibold">
+                            ✓ {{ t('prepaid_badge') }}
+                        </span>
+                        <span v-else class="text-[11px] text-[#1A2E2B]/30">
+                            {{ t('prepaid_not_paid') }}
+                        </span>
+                    </button>
+                </div>
+
+                <div v-if="form.prepaid_cycles.length > 0"
+                     class="mt-3 pt-3 border-t border-[#1A2E2B]/6 text-center">
+                    <p class="text-[12px] text-tema-green font-semibold">
+                        {{ form.prepaid_cycles.length }} {{ t('prepaid_cycles_selected') }}
+                        — {{ formatFcfa(form.prepaid_cycles.length * (form.contribution_amount ?? 0)) }}
+                        {{ t('prepaid_already_paid') }}
+                    </p>
+                    <p class="text-[11px] text-[#1A2E2B]/40 mt-0.5">
+                        {{ t('prepaid_no_deduction') }}
+                    </p>
+                </div>
             </div>
 
             <!-- Aperçu -->
             <div v-if="totalPayoutPreview || myPayoutDatesPreview.length > 0"
                  class="bg-tema-green/10 border border-tema-green/20 rounded-2xl p-5 space-y-3">
-                <p class="text-[11px] font-semibold text-tema-green uppercase tracking-widest">
-                    {{ t('tontine_preview') }}
-                </p>
+                <p class="text-[11px] font-semibold text-tema-green uppercase tracking-widest">{{ t('tontine_preview') }}</p>
 
                 <div class="flex justify-between items-center">
                     <span class="text-[13px] text-[#1A2E2B]/70">{{ t('tontine_total_get') }}</span>
-                    <span class="font-display font-semibold text-tema-green text-[17px]">
-                        {{ formatFcfa(totalPayoutPreview) }}
-                    </span>
+                    <span class="font-display font-semibold text-tema-green text-[17px]">{{ formatFcfa(totalPayoutPreview) }}</span>
                 </div>
 
                 <div class="text-[12px] text-[#1A2E2B]/60">
@@ -337,32 +385,23 @@ function submit() {
 
                 <div v-if="myPayoutDatesPreview.length > 0"
                      class="pt-2 border-t border-tema-green/20 space-y-1.5">
-                    <p class="text-[11px] text-tema-green/70 font-semibold mb-2">
-                        {{ t('tontine_est_dates') }}
-                    </p>
+                    <p class="text-[11px] text-tema-green/70 font-semibold mb-2">{{ t('tontine_est_dates') }}</p>
                     <div v-for="item in myPayoutDatesPreview" :key="item.position"
                          class="flex justify-between items-center">
-                        <span class="text-[12px] text-[#1A2E2B]/60">
-                            {{ t('turn') }} {{ item.position }}
-                        </span>
-                        <span class="text-[12px] font-semibold text-[#1A2E2B]">
-                            {{ item.date }}
-                        </span>
+                        <span class="text-[12px] text-[#1A2E2B]/60">{{ t('turn') }} {{ item.position }}</span>
+                        <span class="text-[12px] font-semibold text-[#1A2E2B]">{{ item.date }}</span>
                     </div>
                 </div>
 
                 <div v-if="totalDurationPreview"
                      class="flex justify-between items-center pt-2 border-t border-tema-green/20">
                     <span class="text-[13px] text-[#1A2E2B]/70">{{ t('tontine_duration') }}</span>
-                    <span class="text-[13px] font-semibold text-[#1A2E2B]">
-                        {{ totalDurationPreview }}
-                    </span>
+                    <span class="text-[13px] font-semibold text-[#1A2E2B]">{{ totalDurationPreview }}</span>
                 </div>
             </div>
 
             <!-- Bouton créer -->
-            <button @click="submit"
-                    :disabled="!canSubmit"
+            <button @click="submit" :disabled="!canSubmit"
                     class="w-full bg-tema-green text-white font-semibold py-4 rounded-2xl text-[15px] transition-all hover:bg-tema-green-light disabled:opacity-40 disabled:cursor-not-allowed shadow-sm mb-6">
                 {{ form.processing ? t('tontine_creating') : t('tontine_create_go') }}
             </button>

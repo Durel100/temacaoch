@@ -86,6 +86,16 @@ function deactivate() {
     if (!confirm(t('confirm_deactivate'))) return;
     router.patch(route('tontines.deactivate', props.tontine.id));
 }
+
+function reactivate() {
+    if (!confirm(t('confirm_reactivate'))) return;
+    router.patch(route('tontines.reactivate', props.tontine.id));
+}
+
+function deleteTontine() {
+    if (!confirm(t('confirm_delete_tontine'))) return;
+    router.delete(route('tontines.destroy', props.tontine.id));
+}
 </script>
 
 <template>
@@ -108,11 +118,22 @@ function deactivate() {
                         </p>
                     </div>
                 </div>
-                <button v-if="tontine.is_active"
-                        @click="deactivate"
-                        class="text-[12px] text-[#1A2E2B]/35 hover:text-tema-brick transition-colors">
-                    {{ t('tontine_deactivate') }}
-                </button>
+                <div class="flex items-center gap-2">
+                    <button v-if="tontine.is_active"
+                            @click="deactivate"
+                            class="text-[12px] text-[#1A2E2B]/35 hover:text-tema-brick transition-colors">
+                        {{ t('tontine_deactivate') }}
+                    </button>
+                    <button v-if="!tontine.is_active"
+                            @click="reactivate"
+                            class="text-[12px] bg-tema-green/10 text-tema-green font-semibold px-2.5 py-1 rounded-lg hover:bg-tema-green/20 transition-all">
+                        {{ t('tontine_reactivate') }}
+                    </button>
+                    <button @click="deleteTontine"
+                            class="text-[12px] text-tema-brick/50 hover:text-tema-brick transition-colors ml-1">
+                        🗑
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -257,12 +278,22 @@ function deactivate() {
                 </div>
             </div>
 
-            <!-- Infos tontine désactivée -->
+            <!-- Tontine désactivée -->
             <div v-if="!tontine.is_active"
-                 class="bg-[#1A2E2B]/4 rounded-2xl p-4 text-center">
-                <p class="text-[13px] text-[#1A2E2B]/50 font-medium">
+                 class="bg-[#1A2E2B]/4 rounded-2xl p-5">
+                <p class="text-[13px] text-[#1A2E2B]/50 font-medium text-center mb-3">
                     {{ t('tontine_done') }}
                 </p>
+                <div class="flex gap-2">
+                    <button @click="reactivate"
+                            class="flex-1 bg-tema-green text-white text-[13px] font-semibold py-2.5 rounded-xl hover:bg-tema-green-light transition-all">
+                        {{ t('tontine_reactivate') }}
+                    </button>
+                    <button @click="deleteTontine"
+                            class="flex-1 border-[1.5px] border-tema-brick/30 text-tema-brick text-[13px] font-semibold py-2.5 rounded-xl hover:bg-tema-brick/8 transition-all">
+                        {{ t('tontine_delete') }}
+                    </button>
+                </div>
             </div>
 
             <div class="pb-4"></div>
