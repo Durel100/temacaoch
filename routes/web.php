@@ -91,11 +91,11 @@ Route::middleware('auth')->group(function () {
             Route::patch('/charges/{charge}/toggle', [FinanceController::class, 'toggleCharge'])->name('charges.toggle');
             Route::delete('/charges/{charge}',       [FinanceController::class, 'destroyCharge'])->name('charges.destroy');
             Route::post('/charges/{charge}/pay', [FinanceController::class, 'payCharge'])->name('charges.pay');
-            Route::get('/goals', [FinancialGoalController::class, 'index'])->name('goals.index');
         });
 
         // ── Objectifs ───────────────────────────────────────────────
         Route::prefix('goals')->name('goals.')->group(function () {
+            Route::get('/',                  [FinancialGoalController::class, 'index'])->name('index');
             Route::post('/',                 [FinancialGoalController::class, 'store'])->name('store');
             Route::post('/{goal}/progress',  [FinancialGoalController::class, 'addProgress'])->name('progress');
             Route::delete('/{goal}',         [FinancialGoalController::class, 'destroy'])->name('destroy');

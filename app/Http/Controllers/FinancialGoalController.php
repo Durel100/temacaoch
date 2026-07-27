@@ -6,6 +6,7 @@ use App\Models\FinancialGoal;
 use App\Http\Services\FinancialCalculatorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Inertia\Inertia;
 
 class FinancialGoalController extends Controller
 {
