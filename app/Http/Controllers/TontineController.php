@@ -165,14 +165,19 @@ class TontineController extends Controller
     {
         if ($cycle->group->user_id !== $request->user()->id) abort(403);
 
-        $user   = $request->user();
-        $amount = $cycle->group->contribution_amount;
+        $user  = $request->user();
+        $group = $cycle->group;
+
+        // Montant = cotisation × nombre de mes positions (si plusieurs noms)
+        $myPositionsCount = count($group->my_positions ?? [$group->my_position]);
+        $amountPerCycle   = $group->contribution_amount;
+        $totalAmount      = $amountPerCycle * $myPositionsCount;
 
         $contribution = $cycle->contribution;
 
         if (!$contribution) {
             $contribution = $cycle->contribution()->create([
-                'amount_due'  => $amount,
+                'amount_due'  => $totalAmount,
                 'amount_paid' => 0,
                 'status'      => 'pending',
             ]);
@@ -190,25 +195,29 @@ class TontineController extends Controller
             ]
         );
 
+        $posNote = $myPositionsCount > 1
+            ? " ({$myPositionsCount} noms × " . number_format($amountPerCycle, 0, ',', ' ') . " FCFA)"
+            : "";
+
         Transaction::create([
             'user_id'       => $user->id,
-            'amount'        => $amount,
+            'amount'        => $totalAmount,
             'direction'     => 'out',
             'category_id'   => $category->id,
             'transacted_at' => now(),
             'source'        => 'manual_custom',
-            'note'          => 'Cotisation tontine : ' . $cycle->group->name,
+            'note'          => 'Cotisation tontine : ' . $group->name . $posNote,
         ]);
 
         $this->syncOverdraftDebt($user);
 
-        $nextCycle = $cycle->group->cycles()
+        $nextCycle = $group->cycles()
             ->where('cycle_number', $cycle->cycle_number + 1)
             ->first();
 
         if ($nextCycle && !$nextCycle->contribution) {
             $nextCycle->contribution()->create([
-                'amount_due'  => $amount,
+                'amount_due'  => $totalAmount,
                 'amount_paid' => 0,
                 'status'      => 'pending',
             ]);

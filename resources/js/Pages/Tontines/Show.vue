@@ -65,10 +65,23 @@ const progressPercent = computed(() => {
 const markPaidForm = useForm({});
 
 function markPaid(cycleId) {
-    const amount = new Intl.NumberFormat('fr-FR').format(Math.round(props.tontine.contribution_amount ?? 0));
-    const msg = locale.value === 'en'
-        ? `This contribution of ${amount} FCFA will be deducted from your monthly budget. Confirm?`
-        : `Cette cotisation de ${amount} FCFA sera déduite de ton budget du mois. Confirmer ?`;
+    const positionsCount = props.tontine.my_positions?.length ?? 1;
+    const perCycle       = props.tontine.contribution_amount ?? 0;
+    const totalAmount    = perCycle * positionsCount;
+    const fmtTotal       = new Intl.NumberFormat('fr-FR').format(Math.round(totalAmount));
+    const fmtPer         = new Intl.NumberFormat('fr-FR').format(Math.round(perCycle));
+
+    let msg;
+    if (positionsCount > 1) {
+        msg = locale.value === 'en'
+            ? `This contribution is ${fmtTotal} FCFA (${positionsCount} spots × ${fmtPer} FCFA). It will be deducted from your budget. Confirm?`
+            : `Cette cotisation est de ${fmtTotal} FCFA (${positionsCount} noms × ${fmtPer} FCFA). Elle sera déduite de ton budget. Confirmer ?`;
+    } else {
+        msg = locale.value === 'en'
+            ? `This contribution of ${fmtTotal} FCFA will be deducted from your monthly budget. Confirm?`
+            : `Cette cotisation de ${fmtTotal} FCFA sera déduite de ton budget du mois. Confirmer ?`;
+    }
+
     if (!confirm(msg)) return;
     markPaidForm.post(route('tontines.cycles.mark-paid', cycleId), {
         preserveScroll: true,
