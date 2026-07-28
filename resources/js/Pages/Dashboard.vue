@@ -103,9 +103,8 @@ const goalForm = useForm({
     target_date:   '',
 });
 
-const progressForm   = useForm({ amount: null });
+const progressForm    = useForm({ amount: null });
 const archiveGoalForm = useForm({});
-
 function archiveGoal(goalId) {
     if (!confirm(t('confirm_goal_achieved'))) return;
     archiveGoalForm.post(route('goals.archive', goalId));
@@ -326,14 +325,14 @@ function translateCategory(name) {
                             </p>
 
                             <div class="flex gap-2">
-                                <button @click="addingProgressTo = addingProgressTo === goal.id ? null : goal.id"
-                                        class="flex-1 text-[11px] bg-tema-green/8 text-tema-green font-semibold py-1.5 rounded-lg hover:bg-tema-green/15 transition-all">
-                                    {{ t('goal_save_btn') }}
-                                </button>
                                 <button @click="getEstimate(goal.id)"
                                         :disabled="loadingEstimate === goal.id"
                                         class="flex-1 text-[11px] bg-[#1A2E2B]/5 text-tema-dark/60 font-semibold py-1.5 rounded-lg hover:bg-tema-ocre/10 transition-all disabled:opacity-40">
-                                    {{ loadingEstimate === goal.id ? '...' : t('goal_estimate_btn') }}
+                                    {{ loadingEstimate === goal.id ? '...' : '🤖 ' + t('goal_estimate_btn') }}
+                                </button>
+                                <button @click="archiveGoal(goal.id)"
+                                        class="flex-1 text-[11px] bg-tema-green/10 text-tema-green font-semibold py-1.5 rounded-lg hover:bg-tema-green/20 transition-all">
+                                    ✓ {{ t('goal_achieved_btn') }}
                                 </button>
                             </div>
 
