@@ -7,21 +7,17 @@ import axios from 'axios';
 const { t, locale } = useTranslation();
 
 const props = defineProps({
-    goals: Array,
+    goals:         Array,
+    archivedGoals: Array,
 });
 
-const showGoalForm     = ref(false);
-const addingProgressTo = ref(null);
-const estimations      = ref({});
-const loadingEstimate  = ref(null);
+const showGoalForm    = ref(false);
+const estimations     = ref({});
+const loadingEstimate = ref(null);
+const showArchived    = ref(false);
 
-const goalForm = useForm({
-    label:         '',
-    target_amount: null,
-    target_date:   '',
-});
-
-const progressForm = useForm({ amount: null });
+const goalForm       = useForm({ label: '', target_amount: null, target_date: '' });
+const archiveForm    = useForm({});
 const deleteGoalForm = useForm({});
 
 const suggestedGoals = computed(() => [
@@ -39,10 +35,9 @@ function submitGoal() {
     });
 }
 
-function submitProgress(goalId) {
-    progressForm.post(route('goals.progress', goalId), {
-        onSuccess: () => { addingProgressTo.value = null; progressForm.reset(); },
-    });
+function archiveGoal(goalId) {
+    if (!confirm(t('confirm_goal_achieved'))) return;
+    archiveForm.post(route('goals.archive', goalId));
 }
 
 function deleteGoal(id) {
@@ -50,14 +45,15 @@ function deleteGoal(id) {
     deleteGoalForm.delete(route('goals.destroy', id));
 }
 
-async function getEstimate(goalId) {
-    if (estimations.value[goalId]) { delete estimations.value[goalId]; return; }
-    loadingEstimate.value = goalId;
+async function getEstimate(goal) {
+    if (!goal.can_estimate) return;
+    if (estimations.value[goal.id]) { delete estimations.value[goal.id]; return; }
+    loadingEstimate.value = goal.id;
     try {
-        const res = await axios.get(route('goals.estimate', goalId));
-        estimations.value[goalId] = res.data;
+        const res = await axios.get(route('goals.estimate', goal.id));
+        estimations.value[goal.id] = res.data;
     } catch {
-        estimations.value[goalId] = { estimation: null, message: t('service_unavailable') };
+        estimations.value[goal.id] = { estimation: null, message: t('service_unavailable') };
     } finally {
         loadingEstimate.value = null;
     }
@@ -89,12 +85,8 @@ function progressColor(percent) {
             <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <button @click="router.get(route('dashboard'))"
-                            class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">
-                        ←
-                    </button>
-                    <h1 class="font-display text-[18px] font-semibold text-[#1A2E2B]">
-                        {{ t('my_goals') }}
-                    </h1>
+                            class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">←</button>
+                    <h1 class="font-display text-[18px] font-semibold text-[#1A2E2B]">{{ t('my_goals') }}</h1>
                     <span class="bg-tema-green/10 text-tema-green text-[11px] font-semibold px-2.5 py-1 rounded-full">
                         {{ goals.length }}
                     </span>
@@ -108,11 +100,17 @@ function progressColor(percent) {
 
         <div class="max-w-2xl mx-auto px-4 py-5 space-y-4">
 
-            <!-- Formulaire nouveau objectif -->
-            <div v-if="showGoalForm"
-                 class="bg-white rounded-2xl border border-tema-green/20 p-5 space-y-3">
-                <p class="text-[13px] font-semibold text-[#1A2E2B]">{{ t('new_goal_title') }}</p>
+            <!-- Info nouvelle logique -->
+            <div class="bg-tema-green/8 border border-tema-green/15 rounded-2xl px-4 py-3 flex items-start gap-2">
+                <span class="text-base mt-0.5">💡</span>
+                <p class="text-[12px] text-tema-green/80">
+                    {{ t('goal_transaction_hint') }}
+                </p>
+            </div>
 
+            <!-- Formulaire nouveau objectif -->
+            <div v-if="showGoalForm" class="bg-white rounded-2xl border border-tema-green/20 p-5 space-y-3">
+                <p class="text-[13px] font-semibold text-[#1A2E2B]">{{ t('new_goal_title') }}</p>
                 <div class="flex flex-wrap gap-1.5">
                     <button v-for="s in suggestedGoals" :key="s.label"
                             @click="goalForm.label = s.label"
@@ -123,32 +121,23 @@ function progressColor(percent) {
                         {{ s.emoji }} {{ s.label }}
                     </button>
                 </div>
-
-                <input type="text"
-                       v-model="goalForm.label"
-                       :placeholder="t('goal_name')"
+                <input type="text" v-model="goalForm.label" :placeholder="t('goal_name')"
                        class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5">
-
                 <div class="grid grid-cols-2 gap-2">
                     <div class="relative">
-                        <input type="number"
-                               v-model.number="goalForm.target_amount"
-                               :placeholder="t('target_amount')"
+                        <input type="number" v-model.number="goalForm.target_amount" :placeholder="t('target_amount')"
                                class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5 pr-14">
                         <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#1A2E2B]/40">FCFA</span>
                     </div>
-                    <input type="date"
-                           v-model="goalForm.target_date"
+                    <input type="date" v-model="goalForm.target_date"
                            class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5">
                 </div>
-
                 <div class="flex gap-2">
                     <button @click="showGoalForm = false; goalForm.reset()"
                             class="flex-1 py-2.5 rounded-xl border-[1.5px] border-[#1A2E2B]/12 text-[#1A2E2B]/50 text-[13px] hover:border-[#1A2E2B]/25 transition-all">
                         {{ t('cancel') }}
                     </button>
-                    <button @click="submitGoal"
-                            :disabled="!goalForm.label || !goalForm.target_amount || goalForm.processing"
+                    <button @click="submitGoal" :disabled="!goalForm.label || !goalForm.target_amount || goalForm.processing"
                             class="flex-1 py-2.5 rounded-xl bg-tema-green text-white text-[13px] font-semibold disabled:opacity-40 hover:bg-tema-green-light transition-all">
                         {{ goalForm.processing ? '...' : t('create') }}
                     </button>
@@ -167,16 +156,22 @@ function progressColor(percent) {
                 </button>
             </div>
 
-            <!-- Liste des objectifs -->
+            <!-- Liste des objectifs actifs -->
             <div v-for="goal in goals" :key="goal.id"
                  class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
 
-                <!-- En-tête objectif -->
+                <!-- En-tête -->
                 <div class="flex justify-between items-start mb-3">
                     <div class="flex-1 min-w-0">
-                        <p class="text-[15px] font-semibold text-[#1A2E2B] truncate">{{ goal.label }}</p>
-                        <p v-if="goal.target_date"
-                           class="text-[11px] text-[#1A2E2B]/40 mt-0.5">
+                        <div class="flex items-center gap-2 mb-0.5">
+                            <p class="text-[15px] font-semibold text-[#1A2E2B] truncate">{{ goal.label }}</p>
+                            <!-- Badge catégorie liée -->
+                            <span v-if="goal.category_name"
+                                  class="text-[10px] bg-tema-green/8 text-tema-green px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
+                                📊 {{ t('linked') }}
+                            </span>
+                        </div>
+                        <p v-if="goal.target_date" class="text-[11px] text-[#1A2E2B]/40">
                             {{ t('target_date') }} : {{ formatDate(goal.target_date) }}
                         </p>
                     </div>
@@ -206,15 +201,11 @@ function progressColor(percent) {
                 <!-- Montants -->
                 <div class="flex justify-between items-center mb-4">
                     <div>
-                        <p class="text-[15px] font-display font-semibold text-tema-green">
-                            {{ formatFcfa(goal.current_amount) }}
-                        </p>
+                        <p class="text-[15px] font-display font-semibold text-tema-green">{{ formatFcfa(goal.current_amount) }}</p>
                         <p class="text-[11px] text-[#1A2E2B]/40">{{ t('saved') }}</p>
                     </div>
                     <div class="text-right">
-                        <p class="text-[15px] font-display font-semibold text-[#1A2E2B]">
-                            {{ formatFcfa(goal.target_amount) }}
-                        </p>
+                        <p class="text-[15px] font-display font-semibold text-[#1A2E2B]">{{ formatFcfa(goal.target_amount) }}</p>
                         <p class="text-[11px] text-[#1A2E2B]/40">{{ t('target') }}</p>
                     </div>
                 </div>
@@ -228,46 +219,48 @@ function progressColor(percent) {
                     </p>
                 </div>
 
-                <!-- Objectif atteint -->
-                <div v-if="goal.progress_percent >= 100"
-                     class="bg-tema-green/10 rounded-xl px-3 py-2 mb-4 text-center">
-                    <p class="text-[13px] font-semibold text-tema-green">🎉 {{ t('goal_reached') }}</p>
+                <!-- Comment épargner -->
+                <div v-if="goal.category_name && goal.progress_percent < 100"
+                     class="bg-tema-green/5 rounded-xl px-3 py-2.5 mb-3">
+                    <p class="text-[11px] text-tema-green/80">
+                        💡 {{ t('goal_how_to_save') }}
+                        <span class="font-semibold">{{ goal.category_name }}</span>
+                        {{ t('goal_how_to_save_2') }}
+                    </p>
                 </div>
 
-                <!-- Actions -->
+                <!-- Actions : Estimer + Objectif atteint -->
                 <div class="flex gap-2">
-                    <button @click="addingProgressTo = addingProgressTo === goal.id ? null : goal.id; progressForm.reset()"
+                    <!-- Bouton Estimer -->
+                    <button @click="getEstimate(goal)"
+                            :disabled="loadingEstimate === goal.id || !goal.can_estimate"
                             class="flex-1 text-[12px] font-semibold py-2 rounded-xl transition-all"
-                            :class="addingProgressTo === goal.id
-                                ? 'bg-[#1A2E2B]/8 text-[#1A2E2B]/50'
-                                : 'bg-tema-green/8 text-tema-green hover:bg-tema-green/15'">
-                        {{ addingProgressTo === goal.id ? t('cancel') : t('goal_save_btn') }}
+                            :class="goal.can_estimate
+                                ? 'bg-[#1A2E2B]/5 text-[#1A2E2B]/60 hover:bg-tema-ocre/10'
+                                : 'bg-[#1A2E2B]/3 text-[#1A2E2B]/30 cursor-not-allowed'">
+                        <span v-if="loadingEstimate === goal.id">...</span>
+                        <span v-else-if="!goal.can_estimate">
+                            🔒 {{ t('estimate_locked') }}
+                        </span>
+                        <span v-else>🤖 {{ t('goal_estimate_btn') }}</span>
                     </button>
-                    <button @click="getEstimate(goal.id)"
-                            :disabled="loadingEstimate === goal.id"
-                            class="flex-1 text-[12px] font-semibold py-2 rounded-xl bg-[#1A2E2B]/5 text-[#1A2E2B]/60 hover:bg-tema-ocre/10 transition-all disabled:opacity-40">
-                        {{ loadingEstimate === goal.id ? '...' : t('goal_estimate_btn') }}
+
+                    <!-- Bouton Objectif atteint -->
+                    <button @click="archiveGoal(goal.id)"
+                            class="flex-1 text-[12px] font-semibold py-2 rounded-xl bg-tema-green/10 text-tema-green hover:bg-tema-green/20 transition-all">
+                        ✓ {{ t('goal_achieved_btn') }}
                     </button>
                 </div>
 
-                <!-- Panel épargne -->
-                <div v-if="addingProgressTo === goal.id" class="mt-3 space-y-2">
-                    <div class="relative">
-                        <input type="number"
-                               v-model.number="progressForm.amount"
-                               :placeholder="t('amount_saved_ph')"
-                               min="1"
-                               class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5 pr-16">
-                        <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#1A2E2B]/40">FCFA</span>
-                    </div>
-                    <button @click="submitProgress(goal.id)"
-                            :disabled="!progressForm.amount || progressForm.processing"
-                            class="w-full bg-tema-green text-white text-[13px] font-semibold py-2.5 rounded-xl disabled:opacity-40 hover:bg-tema-green-light transition-all">
-                        {{ progressForm.processing ? t('saving') : t('validate') }}
-                    </button>
+                <!-- Message estimation verrouillée -->
+                <div v-if="!goal.can_estimate && goal.estimation_locked_until"
+                     class="mt-2 text-center">
+                    <p class="text-[11px] text-[#1A2E2B]/35">
+                        {{ t('estimate_available_on') }} {{ goal.estimation_locked_until }}
+                    </p>
                 </div>
 
-                <!-- Estimation IA -->
+                <!-- Estimation IA — visible en permanence jusqu'à archivage -->
                 <div v-if="estimations[goal.id]" class="mt-3 p-3 bg-[#FAF6F0] rounded-xl">
                     <div v-if="estimations[goal.id].estimation">
                         <p class="text-[11px] font-semibold text-[#1A2E2B] mb-1">🤖 {{ t('estimate') }}</p>
@@ -300,6 +293,36 @@ function progressColor(percent) {
                     </p>
                 </div>
 
+            </div>
+
+            <!-- Objectifs archivés -->
+            <div v-if="archivedGoals && archivedGoals.length > 0">
+                <button @click="showArchived = !showArchived"
+                        class="w-full text-center text-[12px] text-[#1A2E2B]/40 hover:text-[#1A2E2B] transition-colors py-2">
+                    {{ showArchived ? '▲' : '▼' }}
+                    {{ archivedGoals.length }} {{ t('archived_goals') }}
+                </button>
+
+                <div v-if="showArchived" class="space-y-3 mt-2">
+                    <div v-for="goal in archivedGoals" :key="goal.id"
+                         class="bg-white rounded-2xl border border-[#1A2E2B]/6 p-4 opacity-60">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-[13px] font-semibold text-[#1A2E2B]">{{ goal.label }}</p>
+                                <p class="text-[11px] text-tema-green mt-0.5">
+                                    ✓ {{ t('goal_achieved_on') }} {{ formatDate(goal.archived_at) }}
+                                </p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[13px] font-semibold text-tema-green">{{ formatFcfa(goal.target_amount) }}</p>
+                                <button @click="deleteGoal(goal.id)"
+                                        class="text-[11px] text-tema-brick/50 hover:text-tema-brick mt-0.5">
+                                    {{ t('delete') }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </div>

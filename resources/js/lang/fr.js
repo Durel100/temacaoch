@@ -615,5 +615,16 @@ export default {
     prepaid_cycles_selected: 'cycle(s) prépayé(s)',
     prepaid_already_paid:    'déjà payé',
     prepaid_no_deduction:    'Ces montants ne seront pas déduits de ton budget.',
-
+    goal_transaction_hint:   'Pour épargner vers un objectif, fais une transaction "Sortie" avec la catégorie de l\'objectif. L\'argent sort de ton budget et alimente l\'objectif.',
+    goal_category_badge:     'Objectif',
+    goal_achieved_btn:       'Objectif atteint',
+    goal_how_to_save:        'Épargne via une transaction "Sortie" → catégorie',
+    goal_how_to_save_2:      'pour alimenter cet objectif.',
+    goal_save_via_transactions: 'Épargne via la catégorie',
+    confirm_goal_achieved:   'Marquer cet objectif comme atteint et l\'archiver ?',
+    archived_goals:          'objectif(s) archivé(s)',
+    goal_achieved_on:        'Atteint en',
+    estimate_locked:         'Estimation indisponible',
+    estimate_available_on:   'Disponible le',
+    linked:                  'Lié',
 };

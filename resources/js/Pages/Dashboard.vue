@@ -103,7 +103,13 @@ const goalForm = useForm({
     target_date:   '',
 });
 
-const progressForm = useForm({ amount: null });
+const progressForm   = useForm({ amount: null });
+const archiveGoalForm = useForm({});
+
+function archiveGoal(goalId) {
+    if (!confirm(t('confirm_goal_achieved'))) return;
+    archiveGoalForm.post(route('goals.archive', goalId));
+}
 
 const suggestedGoals = computed(() => [
     { label: t('goal_emergency'), emoji: '🛡️' },
@@ -331,21 +337,11 @@ function translateCategory(name) {
                                 </button>
                             </div>
 
-                            <!-- Panel épargne -->
-                            <div v-if="addingProgressTo === goal.id" class="mt-2 space-y-2">
-                                <div class="relative">
-                                    <input type="number"
-                                           v-model.number="progressForm.amount"
-                                           :placeholder="t('amount_saved_ph')"
-                                           min="1"
-                                           class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5 pr-16">
-                                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-tema-dark/40">FCFA</span>
-                                </div>
-                                <button @click="submitProgress(goal.id)"
-                                        :disabled="!progressForm.amount || progressForm.processing"
-                                        class="w-full bg-tema-green text-white text-[13px] font-semibold py-2.5 rounded-xl disabled:opacity-40 hover:bg-tema-green-light transition-all">
-                                    {{ progressForm.processing ? t('saving') : t('goal_save_btn') }}
-                                </button>
+                            <!-- Info : épargner via transactions -->
+                            <div v-if="goal.category_name" class="mt-2 text-center">
+                                <p class="text-[10px] text-tema-dark/30">
+                                    {{ t('goal_save_via_transactions') }} "{{ goal.category_name }}"
+                                </p>
                             </div>
 
                             <!-- Estimation IA -->

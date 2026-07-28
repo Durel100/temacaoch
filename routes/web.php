@@ -100,6 +100,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/{goal}/progress',  [FinancialGoalController::class, 'addProgress'])->name('progress');
             Route::delete('/{goal}',         [FinancialGoalController::class, 'destroy'])->name('destroy');
             Route::get('/{goal}/estimate',   [FinancialGoalController::class, 'estimate'])->name('estimate');
+            Route::post('/{goal}/archive', [FinancialGoalController::class, 'archive'])->name('archive');
         });
 
         // ── Coach IA ────────────────────────────────────────────────

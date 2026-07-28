@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\QuickAction;
 use App\Models\Transaction;
 use App\Models\Debt;
+use App\Models\FinancialGoal;
 use App\Http\Services\FinancialCalculatorService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -53,23 +54,38 @@ class TransactionController extends Controller
             'note'            => 'nullable|string|max:500',
         ]);
 
-        $validated['transacted_at'] = $validated['transacted_at'] ?? now();
+        // Parser la date avec la timezone Douala pour éviter le décalage -1h
+        $validated['transacted_at'] = \Carbon\Carbon::parse(
+            $validated['transacted_at'],
+            'Africa/Douala'
+        )->setTimezone(config('app.timezone', 'Africa/Douala'));
         $validated['source']  = $validated['source'] ?? ($validated['quick_action_id'] ? 'quick_action' : 'manual_custom');
         $validated['user_id'] = $request->user()->id;
 
-        // Si pas de catégorie → catégorie "Autre" par défaut
+        // Si pas de catégorie → créer une catégorie avec le nom de la note
+        // ou bloquer si ni catégorie ni note
         if (empty($validated['category_id'])) {
-            $direction = $validated['direction'] ?? 'out';
-            $default = Category::firstOrCreate(
-                ['name' => 'Autre', 'user_id' => null],
-                [
-                    'icon'              => 'wallet',
-                    'default_direction' => $direction,
-                    'is_system'         => true,
-                    'translation_key'   => 'cat_other',
-                ]
-            );
-            $validated['category_id'] = $default->id;
+            $note = trim($validated['note'] ?? '');
+
+            if (!empty($note)) {
+                // Créer une catégorie personnalisée avec le nom de la note
+                $category = Category::firstOrCreate(
+                    [
+                        'name'    => $note,
+                        'user_id' => $validated['user_id'],
+                    ],
+                    [
+                        'icon'              => 'wallet',
+                        'default_direction' => $validated['direction'] ?? 'out',
+                        'is_system'         => false,
+                    ]
+                );
+                $validated['category_id'] = $category->id;
+            } else {
+                return back()->withErrors([
+                    'category_id' => 'Sélectionne un type ou entre une note pour identifier cette transaction.',
+                ]);
+            }
         }
 
         Transaction::create($validated);
@@ -113,6 +129,9 @@ class TransactionController extends Controller
                 $quickAction->incrementUsage();
             }
         }
+
+        // Mettre à jour la progression de l'objectif si catégorie liée
+        $this->syncGoalProgress($request->user(), $validated['category_id'], $validated['amount'], $validated['direction']);
 
         $this->syncOverdraftDebt($request->user());
 
@@ -241,13 +260,49 @@ class TransactionController extends Controller
             abort(403);
         }
 
-        $wasOut = $transaction->direction === 'out';
+        $categoryId = $transaction->category_id;
+        $amount     = $transaction->amount;
+        $direction  = $transaction->direction;
         $transaction->delete();
 
-        // Recalculer le découvert après suppression
+        // Recalculer la progression de l'objectif si catégorie liée
+        // La suppression inverse la direction
+        $inverseDirection = $direction === 'out' ? 'in' : 'out';
+        $this->syncGoalProgress($request->user(), $categoryId, $amount, $inverseDirection);
+
         $this->syncOverdraftDebt($request->user());
 
         return back()->with('success', 'Transaction supprimée.');
+    }
+
+    /**
+     * Met à jour la progression d'un objectif selon la transaction
+     */
+    private function syncGoalProgress($user, ?int $categoryId, float $amount, string $direction): void
+    {
+        if (!$categoryId) return;
+
+        // Chercher si cette catégorie est liée à un objectif actif
+        $goal = FinancialGoal::where('user_id', $user->id)
+            ->where('category_id', $categoryId)
+            ->where('is_archived', false)
+            ->first();
+
+        if (!$goal) return;
+
+        if ($direction === 'out') {
+            // Transaction "out" = épargne vers l'objectif → augmente current_amount
+            $newAmount = min($goal->target_amount, $goal->current_amount + $amount);
+        } else {
+            // Transaction "in" = retrait de l'objectif → diminue current_amount
+            $newAmount = max(0, $goal->current_amount - $amount);
+        }
+
+        $goal->update(['current_amount' => $newAmount]);
+
+        // Archivage automatique si 100% atteint
+        $goal->refresh();
+        $goal->checkAndAutoArchive();
     }
 
     /**

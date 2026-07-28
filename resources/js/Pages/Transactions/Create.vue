@@ -340,8 +340,14 @@ function translateActionLabel(label) {
                                 class="text-left text-[13px] px-3 py-2.5 rounded-xl border-[1.5px] transition-all"
                                 :class="form.category_id === cat.id
                                     ? 'border-tema-green bg-tema-green/10 text-tema-green font-semibold'
-                                    : 'border-[#1A2E2B]/10 text-[#1A2E2B]/70 hover:border-[#1A2E2B]/20'">
-                            {{ tCategory(cat) }}
+                                    : cat.goal_id
+                                        ? 'border-tema-ocre/30 bg-tema-ocre/5 text-[#1A2E2B]/70 hover:border-tema-ocre/50'
+                                        : 'border-[#1A2E2B]/10 text-[#1A2E2B]/70 hover:border-[#1A2E2B]/20'">
+                            <span>{{ tCategory(cat) }}</span>
+                            <span v-if="cat.goal_id"
+                                  class="block text-[10px] text-tema-ocre font-medium mt-0.5">
+                                🎯 {{ t('goal_category_badge') }}
+                            </span>
                         </button>
                     </div>
                     <p v-if="errors.category_id" class="text-[12px] text-tema-brick mt-1">
