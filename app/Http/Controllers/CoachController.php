@@ -154,6 +154,12 @@ class CoachController extends Controller
             'jour_plus_depensier'   => $busiestDay,
         ];
 
+        // ── Stats de la période demandée dans le message ─────────────────────
+        $periodStats = $this->extractPeriodStats($user, $validated['message']);
+        if ($periodStats) {
+            $context['stats_periode_demandee'] = $periodStats;
+        }
+
         // ── Historique de la conversation ─────────────────────────────────────
         $history = $conversation->messages()
             ->orderBy('created_at')
@@ -219,6 +225,7 @@ ABSOLUTE RULES:
 - Always mention amounts in the format: 150,000 FCFA.
 - Keep responses concise (max 150 words) unless the user asks for detail.
 - You may ask ONE follow-up question if relevant.
+- If stats_periode_demandee is present in the context, use that data to answer precisely the question about the requested period.
 
 ACTION BUTTONS:
 If the user mentions a goal or project they want to create, OR asks to record a transaction, add at the very end of your response (after a blank line) an action block like this:
@@ -245,6 +252,7 @@ RÈGLES ABSOLUES :
 - Réponds de manière concise (max 150 mots) sauf si l'utilisateur demande plus de détails.
 - Si le taux d'épargne est négatif ou faible, signale-le et propose des actions concrètes.
 - Tu peux poser UNE seule question de suivi si c'est pertinent.
+- Si stats_periode_demandee est présent dans le contexte, utilise ces données pour répondre précisément à la question sur la période demandée.
 
 BOUTONS D'ACTION :
 Si l'utilisateur mentionne un objectif ou projet qu'il veut créer, OU demande à enregistrer une transaction, ajoute à la toute fin de ta réponse (après une ligne vide) un bloc action comme ceci :
@@ -281,13 +289,26 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
                 return response()->json(['error' => 'Réponse vide de l\'API.'], 500);
             }
 
+            // Extraire et retirer le bloc <action> du texte visible
+            $action = null;
+            $cleanContent = $aiResponse;
+
+            if (preg_match('/<action>(.*?)<\/action>/s', $aiResponse, $matches)) {
+                $actionJson = trim($matches[1]);
+                $action     = json_decode($actionJson, true);
+                $cleanContent = trim(preg_replace('/<action>.*?<\/action>/s', '', $aiResponse));
+            }
+
             $assistantMessage = $conversation->messages()->create([
                 'role'             => 'assistant',
-                'content'          => $aiResponse,
+                'content'          => $cleanContent,
                 'context_snapshot' => $context,
             ]);
 
-            return response()->json(['message' => $assistantMessage]);
+            return response()->json([
+                'message' => $assistantMessage,
+                'action'  => $action,
+            ]);
 
         } catch (\Exception $e) {
             \Log::error('Coach error', ['message' => $e->getMessage()]);
@@ -300,5 +321,110 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
         $user = $request->user();
         ChatConversation::where('user_id', $user->id)->first()?->messages()->delete();
         return back()->with('success', 'Conversation effacée.');
+    }
+
+    private function extractPeriodStats($user, string $message): ?array
+    {
+        $now    = now();
+        $start  = null;
+        $end    = null;
+        $label  = null;
+
+        // Mois nommés fr/en
+        $monthNames = [
+            'janvier'=>1,'février'=>2,'fevrier'=>2,'mars'=>3,'avril'=>4,
+            'mai'=>5,'juin'=>6,'juillet'=>7,'août'=>8,'aout'=>8,
+            'septembre'=>9,'octobre'=>10,'novembre'=>11,'décembre'=>12,'decembre'=>12,
+            'january'=>1,'february'=>2,'march'=>3,'april'=>4,'may'=>5,'june'=>6,
+            'july'=>7,'august'=>8,'september'=>9,'october'=>10,'november'=>11,'december'=>12,
+        ];
+
+        // "le mois dernier" / "last month"
+        if (preg_match('/mois dernier|last month/i', $message)) {
+            $start = $now->copy()->subMonth()->startOfMonth();
+            $end   = $now->copy()->subMonth()->endOfMonth();
+            $label = $start->translatedFormat('F Y');
+        }
+
+        // "la semaine dernière" / "last week"
+        elseif (preg_match('/semaine derni[eè]re|last week/i', $message)) {
+            $start = $now->copy()->subWeek()->startOfWeek();
+            $end   = $now->copy()->subWeek()->endOfWeek();
+            $label = 'semaine du ' . $start->translatedFormat('d M');
+        }
+
+        // "cette semaine" / "this week"
+        elseif (preg_match('/cette semaine|this week/i', $message)) {
+            $start = $now->copy()->startOfWeek();
+            $end   = $now->copy()->endOfWeek();
+            $label = 'cette semaine';
+        }
+
+        // "du X au Y [mois]" — ex: "du 1er au 15 juillet"
+        elseif (preg_match('/du\s+(\d+)\w*\s+au\s+(\d+)\w*\s+(\w+)/ui', $message, $m)) {
+            $monthNum = $monthNames[strtolower($m[3])] ?? null;
+            if ($monthNum) {
+                $year  = preg_match('/(202\d)/', $message, $ym) ? (int)$ym[1] : $now->year;
+                $start = Carbon::create($year, $monthNum, (int)$m[1])->startOfDay();
+                $end   = Carbon::create($year, $monthNum, (int)$m[2])->endOfDay();
+                $label = "du {$m[1]} au {$m[2]} {$m[3]}";
+            }
+        }
+
+        // "en [mois]" ou "[mois] [année]" — ex: "en juin", "en juillet 2026"
+        else {
+            foreach ($monthNames as $name => $num) {
+                if (preg_match('/' . preg_quote($name, '/') . '/i', $message)) {
+                    $year  = preg_match('/(202\d)/', $message, $ym) ? (int)$ym[1] : $now->year;
+                    $start = Carbon::create($year, $num, 1)->startOfMonth();
+                    $end   = Carbon::create($year, $num, 1)->endOfMonth();
+                    $label = $start->translatedFormat('F Y');
+                    break;
+                }
+            }
+        }
+
+        if (!$start || !$end) return null;
+
+        $tr  = $user->transactions()
+            ->whereBetween('transacted_at', [$start, $end])
+            ->with('category')
+            ->get();
+
+        $in  = $tr->where('direction', 'in')->sum('amount');
+        $out = $tr->where('direction', 'out')->sum('amount');
+
+        $byCategory = $tr->where('direction', 'out')
+            ->groupBy(fn ($t) => $t->category?->name ?? 'Autre')
+            ->map(fn ($g) => [
+                'categorie' => $g->first()->category?->name ?? 'Autre',
+                'total'     => $g->sum('amount'),
+                'nombre'    => $g->count(),
+            ])
+            ->sortByDesc('total')
+            ->take(5)
+            ->values()
+            ->toArray();
+
+        $byIncome = $tr->where('direction', 'in')
+            ->groupBy(fn ($t) => $t->category?->name ?? 'Revenu')
+            ->map(fn ($g) => [
+                'source' => $g->first()->category?->name ?? 'Revenu',
+                'total'  => $g->sum('amount'),
+            ])
+            ->sortByDesc('total')
+            ->values()
+            ->toArray();
+
+        return [
+            'periode'         => $label ?? ($start->toDateString() . ' → ' . $end->toDateString()),
+            'total_entrees'   => $in,
+            'total_sorties'   => $out,
+            'solde_net'       => $in - $out,
+            'taux_epargne'    => $in > 0 ? round((($in - $out) / $in) * 100, 1) . '%' : '0%',
+            'nb_transactions' => $tr->count(),
+            'sources_revenus' => $byIncome,
+            'top_categories'  => $byCategory,
+        ];
     }
 }
