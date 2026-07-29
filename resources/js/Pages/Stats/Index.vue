@@ -29,10 +29,6 @@ const props = defineProps({
     busiestDay:       Object,
     busiestHour:      Number,
     transactions:     Array,
-    resteAVivre:      Number,
-    salaryDay:        Number,
-    cycleStart:       String,
-    cycleEnd:         String,
 });
 
 const selectedPeriod = ref(props.period);
@@ -148,17 +144,6 @@ const visibleTransactions = computed(() =>
                 </div>
             </div>
 
-            <!-- Info cycle financier -->
-            <div v-if="salaryDay && period === 'month'"
-                 class="bg-tema-green/8 border border-tema-green/15 rounded-2xl px-4 py-2.5 flex items-center gap-2">
-                <span class="text-base">📅</span>
-                <p class="text-[12px] text-tema-green/80">
-                    {{ locale === 'en'
-                        ? `Financial cycle: ${formatDate(cycleStart)} → ${formatDate(cycleEnd)} (payday: ${salaryDay})`
-                        : `Cycle financier : ${formatDate(cycleStart)} → ${formatDate(cycleEnd)} (paie le ${salaryDay})` }}
-                </p>
-            </div>
-
             <!-- Résumé + Taux d'épargne -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-4">
@@ -174,9 +159,6 @@ const visibleTransactions = computed(() =>
                     <p class="font-display font-semibold text-[15px]"
                        :class="balance >= 0 ? 'text-tema-green' : 'text-tema-brick'">
                         {{ balance >= 0 ? '+' : '' }}{{ formatFcfa(balance) }}
-                    </p>
-                    <p v-if="resteAVivre" class="text-[10px] text-[#1A2E2B]/35 mt-0.5">
-                        {{ locale === 'en' ? 'incl. declared balance' : 'solde déclaré inclus' }}
                     </p>
                 </div>
                 <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-4">
@@ -228,58 +210,6 @@ const visibleTransactions = computed(() =>
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Prévision fin de mois -->
-            <div v-if="forecast"
-                 class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
-                <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-4">
-                    {{ t('forecast_title') }}
-                </p>
-                <div class="grid grid-cols-3 gap-2 mb-4">
-                    <div class="text-center">
-                        <p class="text-[10px] text-[#1A2E2B]/40 mb-0.5">{{ t('days_elapsed') }}</p>
-                        <p class="text-[18px] font-display font-semibold text-[#1A2E2B]">{{ forecast.days_elapsed }}</p>
-                    </div>
-                    <div class="text-center border-x border-[#1A2E2B]/6">
-                        <p class="text-[10px] text-[#1A2E2B]/40 mb-0.5">{{ t('daily_avg_out') }}</p>
-                        <p class="text-[13px] font-semibold text-tema-brick">{{ formatFcfa(forecast.daily_avg_out) }}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[10px] text-[#1A2E2B]/40 mb-0.5">{{ t('days_remaining') }}</p>
-                        <p class="text-[18px] font-display font-semibold text-[#1A2E2B]">{{ forecast.days_remaining }}</p>
-                    </div>
-                </div>
-                <div class="bg-[#FAF6F0] rounded-xl p-4 space-y-2">
-                    <p class="text-[11px] font-semibold text-[#1A2E2B]/50 uppercase tracking-widest">
-                        {{ t('forecast_end_month') }}
-                    </p>
-                    <div class="flex justify-between items-center">
-                        <span class="text-[13px] text-[#1A2E2B]/70">{{ t('forecast_out') }}</span>
-                        <span class="font-semibold text-tema-brick text-[13px]">{{ formatFcfa(forecast.forecast_out) }}</span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-[13px] text-[#1A2E2B]/70">{{ t('forecast_in') }}</span>
-                        <span class="font-semibold text-tema-green text-[13px]">{{ formatFcfa(forecast.forecast_in) }}</span>
-                    </div>
-                    <div class="flex justify-between items-center pt-2 border-t border-[#1A2E2B]/8">
-                        <span class="text-[13px] font-semibold text-[#1A2E2B]">{{ t('forecast_balance') }}</span>
-                        <span class="font-display font-semibold text-[15px]"
-                              :class="forecast.forecast_balance >= 0 ? 'text-tema-green' : 'text-tema-brick'">
-                            {{ forecast.forecast_balance >= 0 ? '+' : '' }}{{ formatFcfa(forecast.forecast_balance) }}
-                        </span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-[12px] text-[#1A2E2B]/50">{{ t('forecast_savings_rate') }}</span>
-                        <span class="text-[12px] font-semibold"
-                              :class="forecast.forecast_savings_rate >= 20 ? 'text-tema-green' : forecast.forecast_savings_rate >= 0 ? 'text-tema-ocre' : 'text-tema-brick'">
-                            {{ forecast.forecast_savings_rate }}%
-                        </span>
-                    </div>
-                </div>
-                <p class="text-[11px] text-[#1A2E2B]/35 mt-2 text-center italic">
-                    {{ t('forecast_disclaimer') }}
-                </p>
             </div>
 
             <!-- Détail jour par jour -->

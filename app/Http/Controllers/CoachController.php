@@ -55,30 +55,72 @@ class CoachController extends Controller
         $calculator  = new FinancialCalculatorService($user);
         $recommender = new RecommendationEngineService($user);
 
-        // ── Contexte financier de base ────────────────────────────────────────
+        // ── Contexte financier complet ────────────────────────────────────────
+        $resteAVivre   = $calculator->getResteAVivre();
+        $realRemaining = $calculator->getRealRemainingBudget();
+        $totalIn_ctx   = $calculator->getCurrentMonthTransactionsIn();
+        $totalOut_ctx  = $calculator->getCurrentMonthVariableSpending();
+
+        // Tontines avec prochaine date de cotisation
+        $tontinesDetail = $user->tontineGroups->where('is_active', true)->map(function ($t) {
+            $nextCycle = $t->nextCycle();
+            $myPositions = is_array($t->my_positions) ? $t->my_positions : json_decode($t->my_positions ?? '[]', true);
+            $nbPositions = count($myPositions) ?: 1;
+            return [
+                'nom'                    => $t->name,
+                'cotisation_par_nom'     => $t->contribution_amount,
+                'nb_noms'                => $nbPositions,
+                'cotisation_totale'      => $t->contribution_amount * $nbPositions,
+                'prochaine_date'         => $nextCycle?->scheduled_date,
+                'jours_avant_cotisation' => $nextCycle
+                    ? max(0, (int) now()->diffInDays(\Carbon\Carbon::parse($nextCycle->scheduled_date), false))
+                    : null,
+                'mon_tour_reception'     => $t->myPayoutCycle()?->scheduled_date,
+            ];
+        });
+
+        // Charges fixes avec statut paiement ce mois
+        $chargesDetail = $user->fixedCharges->where('is_active', true)->map(function ($c) {
+            $paidThisMonth = \App\Models\Transaction::where('user_id', $c->user_id)
+                ->where('fixed_charge_id', $c->id)
+                ->whereMonth('transacted_at', now()->month)
+                ->whereYear('transacted_at', now()->year)
+                ->sum('amount');
+            return [
+                'label'          => $c->label,
+                'montant'        => $c->monthly_equivalent,
+                'paye_ce_mois'   => $paidThisMonth,
+                'reste_a_payer'  => max(0, $c->monthly_equivalent - $paidThisMonth),
+                'est_paye'       => $paidThisMonth >= $c->monthly_equivalent,
+            ];
+        });
+
         $context = [
+            'date_aujourdhui'            => now()->translatedFormat('l d F Y'),
+            'jour_paye'                  => $user->profile?->salary_day,
             'revenu_reference'           => $calculator->getSafeIncomeBaseline(),
+            'solde_declare_onboarding'   => $resteAVivre,
             'charges_fixes_total'        => $calculator->getTotalMonthlyFixedCharges(),
-            'reste_a_vivre'              => $calculator->getResteAVivre(),
-            'depenses_variables_ce_mois' => $calculator->getCurrentMonthVariableSpending(),
-            'budget_reel_restant'        => $calculator->getRealRemainingBudget(),
-            'jours_restants_mois'        => now()->daysInMonth - now()->day,
+            'budget_reel_restant'        => $realRemaining,
+            'total_entrees_ce_mois'      => $totalIn_ctx,
+            'total_sorties_ce_mois'      => $totalOut_ctx,
+            'solde_reel'                 => $resteAVivre + $totalIn_ctx - $totalOut_ctx,
+            'jours_restants_mois'        => $calculator->getDaysLeftInFinancialMonth(),
             'recommandations_actives'    => $recommender->getTopRecommendations(3),
-            'dettes'    => $user->debts->map(fn ($d) => [
+            'dettes'    => $user->debts->where('remaining_amount', '>', 0)->map(fn ($d) => [
                 'label'   => $d->label,
                 'restant' => $d->remaining_amount,
                 'taux'    => $d->interest_rate,
             ]),
-            'objectifs' => $user->financialGoals->map(fn ($g) => [
+            'objectifs' => $user->financialGoals->where('is_archived', false)->map(fn ($g) => [
                 'label'       => $g->label,
                 'cible'       => $g->target_amount,
                 'actuel'      => $g->current_amount,
-                'progression' => $g->progress_percent,
+                'progression' => $g->progress_percent . '%',
+                'echeance'    => $g->target_date?->translatedFormat('d M Y'),
             ]),
-            'tontines'  => $user->tontineGroups->where('is_active', true)->map(fn ($t) => [
-                'nom'       => $t->name,
-                'cotisation' => $t->contribution_amount,
-            ]),
+            'tontines'      => $tontinesDetail,
+            'charges_fixes' => $chargesDetail,
         ];
 
         // ── Statistiques du mois en cours ─────────────────────────────────────
@@ -140,10 +182,10 @@ class CoachController extends Controller
         $context['stats_ce_mois'] = [
             'total_entrees'         => $totalIn,
             'total_sorties'         => $totalOut,
-            'solde_net'             => $totalIn - $totalOut,
+            'solde_net'             => $resteAVivre + $totalIn - $totalOut,
+            'solde_net_transactions' => $totalIn - $totalOut,
             'taux_epargne'          => $savingsRate . '%',
             'depense_moyenne_jour'  => $dailyAvgOut,
-            'prevision_fin_mois'    => $forecastOut,
             'vs_mois_precedent_out' => $prevOut > 0
                 ? round((($totalOut - $prevOut) / $prevOut) * 100) . '%'
                 : 'N/A',
@@ -225,14 +267,21 @@ ABSOLUTE RULES:
 - Always mention amounts in the format: 150,000 FCFA.
 - Keep responses concise (max 150 words) unless the user asks for detail.
 - You may ask ONE follow-up question if relevant.
-- If stats_periode_demandee is present in the context, use that data to answer precisely the question about the requested period.
+- If stats_periode_demandee is present in the context, use that data to answer the question about the requested period. NEVER say you don't have the info if it's in the context.
 
 ACTION BUTTONS:
-If the user mentions a goal or project they want to create, OR asks to record a transaction, add at the very end of your response (after a blank line) an action block like this:
-<action>" . json_encode(['type' => 'create_goal', 'label' => 'Example goal', 'amount' => 50000, 'target_date' => null], JSON_UNESCAPED_UNICODE) . "</action>
+If the user explicitly mentions wanting to create or add something, add ONE action block at the very end of your response (after a blank line).
 
-Use type 'create_goal' for savings goals/projects. Use type 'create_transaction' for expenses or income to record.
-Only include an action block when the user explicitly mentions creating something or recording a transaction.";
+For a savings goal or project:
+<action>" . json_encode(['type' => 'create_goal', 'label' => 'Goal name', 'amount' => 50000, 'target_date' => null], JSON_UNESCAPED_UNICODE) . "</action>
+
+For a recurring fixed charge (rent, subscription, loan payment, etc.):
+<action>" . json_encode(['type' => 'create_fixed_charge', 'label' => 'Charge name', 'amount' => 10000, 'frequency' => 'monthly'], JSON_UNESCAPED_UNICODE) . "</action>
+
+For a one-time expense or income to record:
+<action>" . json_encode(['type' => 'create_transaction', 'label' => 'Description', 'amount' => 5000, 'direction' => 'out'], JSON_UNESCAPED_UNICODE) . "</action>
+
+Only include ONE action block and only when the user explicitly mentions creating or adding something.";
         } else {
             $systemPrompt = "Tu es TemaCoach, un coach financier personnel pour des utilisateurs au Cameroun.
 {$languageInstruction}
@@ -252,14 +301,21 @@ RÈGLES ABSOLUES :
 - Réponds de manière concise (max 150 mots) sauf si l'utilisateur demande plus de détails.
 - Si le taux d'épargne est négatif ou faible, signale-le et propose des actions concrètes.
 - Tu peux poser UNE seule question de suivi si c'est pertinent.
-- Si stats_periode_demandee est présent dans le contexte, utilise ces données pour répondre précisément à la question sur la période demandée.
+- Si stats_periode_demandee est présent dans le contexte, utilise ces données pour répondre précisément à la question sur la période demandée. Ne dis JAMAIS que tu n'as pas l'info si elle est dans le contexte.
 
 BOUTONS D'ACTION :
-Si l'utilisateur mentionne un objectif ou projet qu'il veut créer, OU demande à enregistrer une transaction, ajoute à la toute fin de ta réponse (après une ligne vide) un bloc action comme ceci :
-<action>" . json_encode(['type' => 'create_goal', 'label' => 'Exemple objectif', 'amount' => 50000, 'target_date' => null], JSON_UNESCAPED_UNICODE) . "</action>
+Si l'utilisateur mentionne explicitement vouloir créer ou ajouter quelque chose, ajoute UN seul bloc action à la toute fin de ta réponse (après une ligne vide).
 
-Utilise type 'create_goal' pour les objectifs/projets d'épargne. Utilise type 'create_transaction' pour les dépenses ou revenus à enregistrer.
-N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir créer quelque chose ou enregistrer une transaction.";
+Pour un objectif ou projet d'épargne :
+<action>" . json_encode(['type' => 'create_goal', 'label' => 'Nom objectif', 'amount' => 50000, 'target_date' => null], JSON_UNESCAPED_UNICODE) . "</action>
+
+Pour une charge fixe récurrente (loyer, abonnement, remboursement, etc.) :
+<action>" . json_encode(['type' => 'create_fixed_charge', 'label' => 'Nom charge', 'amount' => 10000, 'frequency' => 'monthly'], JSON_UNESCAPED_UNICODE) . "</action>
+
+Pour une dépense ou revenu ponctuel à enregistrer :
+<action>" . json_encode(['type' => 'create_transaction', 'label' => 'Description', 'amount' => 5000, 'direction' => 'out'], JSON_UNESCAPED_UNICODE) . "</action>
+
+N'inclus QU'UN SEUL bloc action et seulement si l'utilisateur mentionne explicitement vouloir créer ou ajouter quelque chose.";
         }
 
         try {
@@ -289,26 +345,13 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
                 return response()->json(['error' => 'Réponse vide de l\'API.'], 500);
             }
 
-            // Extraire et retirer le bloc <action> du texte visible
-            $action = null;
-            $cleanContent = $aiResponse;
-
-            if (preg_match('/<action>(.*?)<\/action>/s', $aiResponse, $matches)) {
-                $actionJson = trim($matches[1]);
-                $action     = json_decode($actionJson, true);
-                $cleanContent = trim(preg_replace('/<action>.*?<\/action>/s', '', $aiResponse));
-            }
-
             $assistantMessage = $conversation->messages()->create([
                 'role'             => 'assistant',
-                'content'          => $cleanContent,
+                'content'          => $aiResponse,
                 'context_snapshot' => $context,
             ]);
 
-            return response()->json([
-                'message' => $assistantMessage,
-                'action'  => $action,
-            ]);
+            return response()->json(['message' => $assistantMessage]);
 
         } catch (\Exception $e) {
             \Log::error('Coach error', ['message' => $e->getMessage()]);
@@ -325,12 +368,11 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
 
     private function extractPeriodStats($user, string $message): ?array
     {
-        $now    = now();
-        $start  = null;
-        $end    = null;
-        $label  = null;
+        $now   = now();
+        $start = null;
+        $end   = null;
+        $label = null;
 
-        // Mois nommés fr/en
         $monthNames = [
             'janvier'=>1,'février'=>2,'fevrier'=>2,'mars'=>3,'avril'=>4,
             'mai'=>5,'juin'=>6,'juillet'=>7,'août'=>8,'aout'=>8,
@@ -339,45 +381,32 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
             'july'=>7,'august'=>8,'september'=>9,'october'=>10,'november'=>11,'december'=>12,
         ];
 
-        // "le mois dernier" / "last month"
         if (preg_match('/mois dernier|last month/i', $message)) {
             $start = $now->copy()->subMonth()->startOfMonth();
             $end   = $now->copy()->subMonth()->endOfMonth();
             $label = $start->translatedFormat('F Y');
-        }
-
-        // "la semaine dernière" / "last week"
-        elseif (preg_match('/semaine derni[eè]re|last week/i', $message)) {
+        } elseif (preg_match('/semaine derni[eè]re|last week/i', $message)) {
             $start = $now->copy()->subWeek()->startOfWeek();
             $end   = $now->copy()->subWeek()->endOfWeek();
-            $label = 'semaine du ' . $start->translatedFormat('d M');
-        }
-
-        // "cette semaine" / "this week"
-        elseif (preg_match('/cette semaine|this week/i', $message)) {
+            $label = 'semaine du ' . $start->translatedFormat('d M') . ' au ' . $end->translatedFormat('d M');
+        } elseif (preg_match('/cette semaine|this week/i', $message)) {
             $start = $now->copy()->startOfWeek();
             $end   = $now->copy()->endOfWeek();
             $label = 'cette semaine';
-        }
-
-        // "du X au Y [mois]" — ex: "du 1er au 15 juillet"
-        elseif (preg_match('/du\s+(\d+)\w*\s+au\s+(\d+)\w*\s+(\w+)/ui', $message, $m)) {
+        } elseif (preg_match('/du\s+(\d+)\w*\s+au\s+(\d+)\w*\s+(\w+)/ui', $message, $m)) {
             $monthNum = $monthNames[strtolower($m[3])] ?? null;
             if ($monthNum) {
                 $year  = preg_match('/(202\d)/', $message, $ym) ? (int)$ym[1] : $now->year;
-                $start = Carbon::create($year, $monthNum, (int)$m[1])->startOfDay();
-                $end   = Carbon::create($year, $monthNum, (int)$m[2])->endOfDay();
+                $start = \Carbon\Carbon::create($year, $monthNum, (int)$m[1])->startOfDay();
+                $end   = \Carbon\Carbon::create($year, $monthNum, (int)$m[2])->endOfDay();
                 $label = "du {$m[1]} au {$m[2]} {$m[3]}";
             }
-        }
-
-        // "en [mois]" ou "[mois] [année]" — ex: "en juin", "en juillet 2026"
-        else {
+        } else {
             foreach ($monthNames as $name => $num) {
                 if (preg_match('/' . preg_quote($name, '/') . '/i', $message)) {
                     $year  = preg_match('/(202\d)/', $message, $ym) ? (int)$ym[1] : $now->year;
-                    $start = Carbon::create($year, $num, 1)->startOfMonth();
-                    $end   = Carbon::create($year, $num, 1)->endOfMonth();
+                    $start = \Carbon\Carbon::create($year, $num, 1)->startOfMonth();
+                    $end   = \Carbon\Carbon::create($year, $num, 1)->endOfMonth();
                     $label = $start->translatedFormat('F Y');
                     break;
                 }
@@ -401,10 +430,7 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
                 'total'     => $g->sum('amount'),
                 'nombre'    => $g->count(),
             ])
-            ->sortByDesc('total')
-            ->take(5)
-            ->values()
-            ->toArray();
+            ->sortByDesc('total')->take(5)->values()->toArray();
 
         $byIncome = $tr->where('direction', 'in')
             ->groupBy(fn ($t) => $t->category?->name ?? 'Revenu')
@@ -412,12 +438,10 @@ N'inclus un bloc action QUE si l'utilisateur mentionne explicitement vouloir cr�
                 'source' => $g->first()->category?->name ?? 'Revenu',
                 'total'  => $g->sum('amount'),
             ])
-            ->sortByDesc('total')
-            ->values()
-            ->toArray();
+            ->sortByDesc('total')->values()->toArray();
 
         return [
-            'periode'         => $label ?? ($start->toDateString() . ' → ' . $end->toDateString()),
+            'periode'         => $label ?? ($start->toDateString() . ' au ' . $end->toDateString()),
             'total_entrees'   => $in,
             'total_sorties'   => $out,
             'solde_net'       => $in - $out,

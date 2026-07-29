@@ -20,6 +20,7 @@ const pendingAction     = ref(null); // action suggérée par le coach
 // Forms pour créer depuis le chat
 const createGoalForm        = useForm({ label: '', target_amount: null, target_date: '' });
 const createTransactionForm = useForm({ amount: null, direction: 'out', category_id: null, note: '', transacted_at: new Date().toISOString().slice(0, 10), source: 'manual_custom' });
+const createChargeForm      = useForm({ label: '', amount: null, frequency: 'monthly', is_active: true });
 
 const suggestions = computed(() => locale.value === 'en'
     ? [
@@ -94,6 +95,10 @@ async function sendMessage(content = null) {
                 createTransactionForm.amount    = response.data.action.amount ?? null;
                 createTransactionForm.direction = response.data.action.direction ?? 'out';
                 createTransactionForm.note      = response.data.action.label ?? '';
+            } else if (response.data.action.type === 'create_fixed_charge') {
+                createChargeForm.label     = response.data.action.label ?? '';
+                createChargeForm.amount    = response.data.action.amount ?? null;
+                createChargeForm.frequency = response.data.action.frequency ?? 'monthly';
             }
         }
 
@@ -133,6 +138,25 @@ function formatTime(dateStr) {
 
 function dismissAction() {
     pendingAction.value = null;
+}
+
+function submitChargeFromChat() {
+    createChargeForm.post(route('finances.charges.store'), {
+        onSuccess: () => {
+            pendingAction.value = null;
+            const successMsg = locale.value === 'en'
+                ? `Fixed charge "${createChargeForm.label}" added successfully!`
+                : `Charge fixe "${createChargeForm.label}" ajoutée avec succès !`;
+            messages.value.push({
+                id:         Date.now(),
+                role:       'assistant',
+                content:    successMsg,
+                created_at: new Date().toISOString(),
+            });
+            createChargeForm.reset();
+            scrollToBottom();
+        },
+    });
 }
 
 function submitGoalFromChat() {
@@ -359,6 +383,37 @@ function submitTransactionFromChat() {
                                         :disabled="!createTransactionForm.amount || createTransactionForm.processing"
                                         class="flex-1 py-2 rounded-xl bg-tema-green text-white text-[12px] font-semibold disabled:opacity-40">
                                     {{ createTransactionForm.processing ? '...' : (locale === 'en' ? 'Record' : 'Enregistrer') }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Créer une charge fixe -->
+                        <div v-else-if="pendingAction.type === 'create_fixed_charge'">
+                            <p class="text-[12px] font-semibold text-tema-green mb-3">
+                                📌 {{ locale === 'en' ? 'Add this fixed charge?' : 'Ajouter cette charge fixe ?' }}
+                            </p>
+                            <div class="space-y-2 mb-3">
+                                <input type="text"
+                                       v-model="createChargeForm.label"
+                                       :placeholder="locale === 'en' ? 'Charge name' : 'Nom de la charge'"
+                                       class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2">
+                                <div class="relative">
+                                    <input type="number"
+                                           v-model.number="createChargeForm.amount"
+                                           :placeholder="locale === 'en' ? 'Monthly amount' : 'Montant mensuel'"
+                                           class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2 pr-12">
+                                    <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#1A2E2B]/40">FCFA</span>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="dismissAction"
+                                        class="flex-1 py-2 rounded-xl border border-[#1A2E2B]/12 text-[12px] text-[#1A2E2B]/50">
+                                    {{ locale === 'en' ? 'Dismiss' : 'Ignorer' }}
+                                </button>
+                                <button @click="submitChargeFromChat"
+                                        :disabled="!createChargeForm.label || !createChargeForm.amount || createChargeForm.processing"
+                                        class="flex-1 py-2 rounded-xl bg-tema-green text-white text-[12px] font-semibold disabled:opacity-40">
+                                    {{ createChargeForm.processing ? '...' : (locale === 'en' ? 'Add charge' : 'Ajouter') }}
                                 </button>
                             </div>
                         </div>
