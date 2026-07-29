@@ -222,6 +222,24 @@ function translateCategory(name) {
     const key = categoryKeyMap[name];
     return key ? t(key) : name;
 }
+
+function granularityLabel(granularite) {
+    const map = {
+        'jour': locale.value === 'en' ? 'day' : 'jour',
+        'semaine': locale.value === 'en' ? 'week' : 'semaine',
+        'mois': locale.value === 'en' ? 'month' : 'mois',
+        'day': locale.value === 'en' ? 'day' : 'jour',
+        'week': locale.value === 'en' ? 'week' : 'semaine',
+        'month': locale.value === 'en' ? 'month' : 'mois',
+    };
+    return map[granularite] ?? (locale.value === 'en' ? 'month' : 'mois');
+}
+
+function durationLabel(est) {
+    const periods = est.duree_periods ?? est.duree_mois;
+    const unit    = granularityLabel(est.granularite ?? 'mois');
+    return periods + ' ' + unit + (periods > 1 && locale.value === 'fr' ? 's' : '');
+}
 </script>
 
 <template>
@@ -347,12 +365,25 @@ function translateCategory(name) {
                             <div v-if="estimations[goal.id]" class="mt-2 p-3 bg-[#FAF6F0] rounded-xl">
                                 <div v-if="estimations[goal.id].estimation">
                                     <p class="text-[11px] font-semibold text-tema-dark mb-1">🤖 {{ t('estimate') }}</p>
+
+                                    <!-- Badge réalisable -->
+                                    <div v-if="estimations[goal.id].estimation.realisable !== undefined" class="mb-2">
+                                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                                              :class="estimations[goal.id].estimation.realisable
+                                                  ? 'bg-tema-green/10 text-tema-green'
+                                                  : 'bg-tema-brick/10 text-tema-brick'">
+                                            {{ estimations[goal.id].estimation.realisable
+                                                ? (locale === 'en' ? '✓ Achievable' : '✓ Réalisable')
+                                                : (locale === 'en' ? '⚠ Not achievable in time' : '⚠ Non réalisable à temps') }}
+                                        </span>
+                                    </div>
+
                                     <p class="text-[11px] text-tema-dark/60 mb-2">
                                         {{ estimations[goal.id].estimation.commentaire }}
                                     </p>
                                     <div class="flex gap-2 text-[11px]">
                                         <div class="flex-1 text-center">
-                                            <p class="text-tema-dark/40">/ {{ t('freq_monthly') }}</p>
+                                            <p class="text-tema-dark/40">/ {{ granularityLabel(estimations[goal.id].estimation.granularite) }}</p>
                                             <p class="font-semibold text-tema-green">
                                                 {{ formatFcfa(estimations[goal.id].estimation.montant_epargne_suggere) }}
                                             </p>
@@ -360,7 +391,7 @@ function translateCategory(name) {
                                         <div class="flex-1 text-center">
                                             <p class="text-tema-dark/40">{{ t('duration') }}</p>
                                             <p class="font-semibold text-tema-dark">
-                                                {{ estimations[goal.id].estimation.duree_mois }} {{ t('months') }}
+                                                {{ durationLabel(estimations[goal.id].estimation) }}
                                             </p>
                                         </div>
                                         <div class="flex-1 text-center">

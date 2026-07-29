@@ -10,12 +10,12 @@ class StatsController extends Controller
 {
     public function index(Request $request)
     {
-        $user   = $request->user();
+        $user   = $request->user()->load(['profile', 'incomeSources', 'fixedCharges']);
         $period = $request->get('period', 'month');
         $year   = (int) $request->get('year',  now()->year);
         $month  = (int) $request->get('month', now()->month);
 
-        [$startDate, $endDate] = $this->getDateRange($period, $year, $month);
+        [$startDate, $endDate] = $this->getFinancialDateRange($user, $period, $year, $month);
 
         $transactions = $user->transactions()
             ->whereBetween('transacted_at', [$startDate, $endDate])
@@ -25,13 +25,18 @@ class StatsController extends Controller
 
         $totalIn    = $transactions->where('direction', 'in')->sum('amount');
         $totalOut   = $transactions->where('direction', 'out')->sum('amount');
-        $balance    = $totalIn - $totalOut;
         $totalCount = $transactions->count();
 
-        // Taux d'epargne
-        $savingsRate = $totalIn > 0
-            ? round((($totalIn - $totalOut) / $totalIn) * 100, 1)
-            : 0;
+        // Solde réel = resteAVivre déclaré + entrées - sorties
+        $calculator  = new \App\Http\Services\FinancialCalculatorService($user);
+        $resteAVivre = $calculator->getResteAVivre();
+        $balance     = $resteAVivre + $totalIn - $totalOut;
+
+        // Taux d'épargne basé sur le revenu de référence
+        $safeIncome  = $calculator->getSafeIncomeBaseline();
+        $savingsRate = $safeIncome > 0
+            ? round((($safeIncome - $totalOut) / $safeIncome) * 100, 1)
+            : ($totalIn > 0 ? round((($totalIn - $totalOut) / $totalIn) * 100, 1) : 0);
 
         // Comparaison mois precedent
         $comparison = null;
@@ -121,9 +126,9 @@ class StatsController extends Controller
 
         // Prevision fin de mois
         $forecast = null;
-        if ($period === 'month' && now()->month === $month && now()->year === $year) {
-            $daysElapsed   = now()->day;
-            $daysRemaining = now()->daysInMonth - $daysElapsed;
+        if ($period === 'month') {
+            $daysElapsed   = $startDate->diffInDays(now());
+            $daysRemaining = now()->diffInDays($endDate);
 
             if ($daysElapsed > 0) {
                 $dailyAvgOut = $totalOut / $daysElapsed;
@@ -206,6 +211,10 @@ class StatsController extends Controller
             'dailyEvolution'   => $this->getDailyEvolution($user, $startDate, $endDate),
             'busiestDay'       => $busiestDay,
             'busiestHour'      => $byHour !== null ? (int) $byHour : null,
+            'resteAVivre'      => $resteAVivre,
+            'salaryDay'        => $user->profile?->salary_day,
+            'cycleStart'       => $startDate->toDateString(),
+            'cycleEnd'         => $endDate->toDateString(),
             'transactions'     => $transactions->map(fn ($t) => [
                 'id'              => $t->id,
                 'amount'          => $t->amount,
@@ -217,6 +226,44 @@ class StatsController extends Controller
                 'source'          => $t->source,
             ])->values(),
         ]);
+    }
+
+    private function getFinancialDateRange($user, string $period, int $year, int $month): array
+    {
+        $salaryDay = $user->profile?->salary_day;
+        $isSalaried = $user->profile?->employment_type === 'salaried';
+
+        // Si salarié avec jour de paie défini → cycle financier personnalisé
+        if ($period === 'month' && $isSalaried && $salaryDay) {
+            $salaryDay = (int) $salaryDay;
+
+            // Début du cycle : jour de paie du mois demandé
+            $cycleStart = Carbon::create($year, $month, min($salaryDay, Carbon::create($year, $month)->daysInMonth));
+
+            // Si on demande le mois courant et qu'on n'a pas encore atteint le jour de paie
+            // → le cycle en cours a commencé le mois précédent
+            if ($cycleStart->isFuture()) {
+                $cycleStart = $cycleStart->copy()->subMonth();
+            }
+
+            $cycleEnd = $cycleStart->copy()->addMonth()->subDay()->endOfDay();
+
+            return [$cycleStart->startOfDay(), $cycleEnd];
+        }
+
+        return match ($period) {
+            'today' => [now()->startOfDay(),   now()->endOfDay()],
+            'week'  => [now()->startOfWeek(),  now()->endOfWeek()],
+            'month' => [
+                Carbon::create($year, $month, 1)->startOfMonth(),
+                Carbon::create($year, $month, 1)->endOfMonth(),
+            ],
+            'year'  => [
+                Carbon::create($year, 1, 1)->startOfYear(),
+                Carbon::create($year, 1, 1)->endOfYear(),
+            ],
+            default => [now()->startOfMonth(), now()->endOfMonth()],
+        };
     }
 
     private function getDateRange(string $period, int $year, int $month): array

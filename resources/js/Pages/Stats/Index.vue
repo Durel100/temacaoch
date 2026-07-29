@@ -29,6 +29,10 @@ const props = defineProps({
     busiestDay:       Object,
     busiestHour:      Number,
     transactions:     Array,
+    resteAVivre:      Number,
+    salaryDay:        Number,
+    cycleStart:       String,
+    cycleEnd:         String,
 });
 
 const selectedPeriod = ref(props.period);
@@ -144,6 +148,17 @@ const visibleTransactions = computed(() =>
                 </div>
             </div>
 
+            <!-- Info cycle financier -->
+            <div v-if="salaryDay && period === 'month'"
+                 class="bg-tema-green/8 border border-tema-green/15 rounded-2xl px-4 py-2.5 flex items-center gap-2">
+                <span class="text-base">📅</span>
+                <p class="text-[12px] text-tema-green/80">
+                    {{ locale === 'en'
+                        ? `Financial cycle: ${formatDate(cycleStart)} → ${formatDate(cycleEnd)} (payday: ${salaryDay})`
+                        : `Cycle financier : ${formatDate(cycleStart)} → ${formatDate(cycleEnd)} (paie le ${salaryDay})` }}
+                </p>
+            </div>
+
             <!-- Résumé + Taux d'épargne -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-4">
@@ -159,6 +174,9 @@ const visibleTransactions = computed(() =>
                     <p class="font-display font-semibold text-[15px]"
                        :class="balance >= 0 ? 'text-tema-green' : 'text-tema-brick'">
                         {{ balance >= 0 ? '+' : '' }}{{ formatFcfa(balance) }}
+                    </p>
+                    <p v-if="resteAVivre" class="text-[10px] text-[#1A2E2B]/35 mt-0.5">
+                        {{ locale === 'en' ? 'incl. declared balance' : 'solde déclaré inclus' }}
                     </p>
                 </div>
                 <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-4">

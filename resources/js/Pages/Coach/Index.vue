@@ -1,6 +1,6 @@
 <script setup>
 import { ref, nextTick, onMounted, computed } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import { useTranslation } from '@/Composables/useTranslation';
 import axios from 'axios';
 
@@ -11,12 +11,16 @@ const props = defineProps({
     conversationId: Number,
 });
 
-const messages      = ref([...props.messages]);
-const inputMessage  = ref('');
-const isLoading     = ref(false);
+const messages          = ref([...props.messages]);
+const inputMessage      = ref('');
+const isLoading         = ref(false);
 const messagesContainer = ref(null);
+const pendingAction     = ref(null); // action suggérée par le coach
 
-// Suggestions selon la langue
+// Forms pour créer depuis le chat
+const createGoalForm        = useForm({ label: '', target_amount: null, target_date: '' });
+const createTransactionForm = useForm({ amount: null, direction: 'out', category_id: null, note: '', transacted_at: new Date().toISOString().slice(0, 10), source: 'manual_custom' });
+
 const suggestions = computed(() => locale.value === 'en'
     ? [
         "How much do I have left this month?",
@@ -24,6 +28,7 @@ const suggestions = computed(() => locale.value === 'en'
         "Should I repay my debts before saving?",
         "How can I better manage my tontine?",
         "Help me plan my monthly budget",
+        "I have a project I want to save for",
     ]
     : [
         "Combien me reste-t-il ce mois ?",
@@ -31,21 +36,18 @@ const suggestions = computed(() => locale.value === 'en'
         "Dois-je rembourser mes dettes avant d'épargner ?",
         "Comment mieux gérer ma tontine ?",
         "Aide-moi à planifier mon budget du mois",
+        "J'ai un projet sur lequel je veux épargner",
     ]
 );
 
-// Label "Toi" / "You"
 const youLabel = computed(() => locale.value === 'en' ? 'You' : 'Toi');
 
-// Message d'erreur technique selon la langue
 const techErrorMessage = computed(() => locale.value === 'en'
     ? "I'm having a technical issue. Please try again in a moment."
     : "Je rencontre un problème technique. Réessaie dans un moment."
 );
 
-onMounted(() => {
-    scrollToBottom();
-});
+onMounted(() => scrollToBottom());
 
 function scrollToBottom() {
     nextTick(() => {
@@ -68,6 +70,7 @@ async function sendMessage(content = null) {
 
     inputMessage.value = '';
     isLoading.value    = true;
+    pendingAction.value = null;
     scrollToBottom();
 
     try {
@@ -77,6 +80,23 @@ async function sendMessage(content = null) {
         });
 
         messages.value.push(response.data.message);
+
+        // Afficher le bouton d'action si le coach en a suggéré une
+        if (response.data.action) {
+            pendingAction.value = response.data.action;
+
+            // Pré-remplir le formulaire selon le type
+            if (response.data.action.type === 'create_goal') {
+                createGoalForm.label         = response.data.action.label ?? '';
+                createGoalForm.target_amount = response.data.action.amount ?? null;
+                createGoalForm.target_date   = response.data.action.target_date ?? '';
+            } else if (response.data.action.type === 'create_transaction') {
+                createTransactionForm.amount    = response.data.action.amount ?? null;
+                createTransactionForm.direction = response.data.action.direction ?? 'out';
+                createTransactionForm.note      = response.data.action.label ?? '';
+            }
+        }
+
         scrollToBottom();
 
     } catch (error) {
@@ -102,15 +122,54 @@ function handleKeydown(e) {
 function clearConversation() {
     if (!confirm(t('confirm_clear_chat'))) return;
     router.delete(route('coach.clear'), {
-        onSuccess: () => { messages.value = []; }
+        onSuccess: () => { messages.value = []; pendingAction.value = null; }
     });
 }
 
 function formatTime(dateStr) {
     const loc = locale.value === 'en' ? 'en-GB' : 'fr-FR';
-    return new Date(dateStr).toLocaleTimeString(loc, {
-        hour:   '2-digit',
-        minute: '2-digit',
+    return new Date(dateStr).toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+}
+
+function dismissAction() {
+    pendingAction.value = null;
+}
+
+function submitGoalFromChat() {
+    createGoalForm.post(route('goals.store'), {
+        onSuccess: () => {
+            pendingAction.value = null;
+            const successMsg = locale.value === 'en'
+                ? `Goal "${createGoalForm.label}" created! You can now find it in your goals.`
+                : `Objectif "${createGoalForm.label}" créé ! Tu peux maintenant le retrouver dans tes objectifs.`;
+            messages.value.push({
+                id:         Date.now(),
+                role:       'assistant',
+                content:    successMsg,
+                created_at: new Date().toISOString(),
+            });
+            createGoalForm.reset();
+            scrollToBottom();
+        },
+    });
+}
+
+function submitTransactionFromChat() {
+    createTransactionForm.post(route('transactions.store'), {
+        onSuccess: () => {
+            pendingAction.value = null;
+            const successMsg = locale.value === 'en'
+                ? `Transaction recorded successfully.`
+                : `Transaction enregistrée avec succès.`;
+            messages.value.push({
+                id:         Date.now(),
+                role:       'assistant',
+                content:    successMsg,
+                created_at: new Date().toISOString(),
+            });
+            createTransactionForm.reset();
+            scrollToBottom();
+        },
     });
 }
 </script>
@@ -123,19 +182,14 @@ function formatTime(dateStr) {
             <div class="max-w-2xl mx-auto w-full flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <button @click="router.get(route('dashboard'))"
-                            class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">
-                        ←
-                    </button>
+                            class="text-[#1A2E2B]/50 hover:text-[#1A2E2B] transition-colors text-[14px]">←</button>
                     <div>
                         <h1 class="font-display text-[18px] font-semibold text-[#1A2E2B] leading-tight">
                             {{ t('coach_title') }}
                         </h1>
-                        <p class="text-[11px] text-[#1A2E2B]/50">
-                            {{ t('coach_subtitle') }}
-                        </p>
+                        <p class="text-[11px] text-[#1A2E2B]/50">{{ t('coach_subtitle') }}</p>
                     </div>
                 </div>
-
                 <button v-if="messages.length > 0"
                         @click="clearConversation"
                         class="text-[12px] text-[#1A2E2B]/40 hover:text-tema-brick transition-colors">
@@ -148,9 +202,8 @@ function formatTime(dateStr) {
         <div ref="messagesContainer"
              class="flex-1 overflow-y-auto px-4 py-6 max-w-2xl mx-auto w-full">
 
-            <!-- État vide — suggestions -->
+            <!-- État vide -->
             <div v-if="messages.length === 0" class="space-y-6">
-
                 <div class="text-center py-8">
                     <div class="w-16 h-16 bg-tema-green/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
                         <span class="text-3xl">💬</span>
@@ -168,8 +221,7 @@ function formatTime(dateStr) {
                         {{ t('frequent_questions') }}
                     </p>
                     <div class="space-y-2">
-                        <button v-for="suggestion in suggestions"
-                                :key="suggestion"
+                        <button v-for="suggestion in suggestions" :key="suggestion"
                                 @click="sendMessage(suggestion)"
                                 class="w-full text-left text-[13px] px-4 py-3 bg-white rounded-xl border border-[#1A2E2B]/10 text-[#1A2E2B]/80 hover:border-tema-green hover:text-tema-green transition-all">
                             {{ suggestion }}
@@ -180,20 +232,17 @@ function formatTime(dateStr) {
 
             <!-- Messages -->
             <div v-else class="space-y-4">
-                <div v-for="message in messages"
-                     :key="message.id"
+                <div v-for="message in messages" :key="message.id"
                      class="flex"
                      :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
 
-                    <!-- Avatar coach -->
                     <div v-if="message.role === 'assistant'"
                          class="w-8 h-8 rounded-xl bg-tema-green/10 flex items-center justify-center flex-shrink-0 mr-2 mt-1">
                         <span class="text-sm">🧑‍💼</span>
                     </div>
 
-                    <!-- Bulle -->
                     <div class="max-w-[75%]">
-                        <div class="px-4 py-3 rounded-2xl text-[13px] leading-relaxed"
+                        <div class="px-4 py-3 rounded-2xl text-[13px] leading-relaxed whitespace-pre-line"
                              :class="message.role === 'user'
                                  ? 'bg-tema-green text-white rounded-tr-sm'
                                  : 'bg-white border border-[#1A2E2B]/10 text-[#1A2E2B]/90 rounded-tl-sm'">
@@ -205,7 +254,6 @@ function formatTime(dateStr) {
                         </p>
                     </div>
 
-                    <!-- Avatar utilisateur -->
                     <div v-if="message.role === 'user'"
                          class="w-8 h-8 rounded-xl bg-tema-green flex items-center justify-center flex-shrink-0 ml-2 mt-1">
                         <span class="text-white text-[11px] font-semibold">{{ youLabel }}</span>
@@ -219,15 +267,105 @@ function formatTime(dateStr) {
                     </div>
                     <div class="bg-white border border-[#1A2E2B]/10 rounded-2xl rounded-tl-sm px-4 py-3">
                         <div class="flex gap-1 items-center">
-                            <div class="w-2 h-2 rounded-full bg-[#1A2E2B]/30 animate-bounce"
-                                 style="animation-delay: 0ms"/>
-                            <div class="w-2 h-2 rounded-full bg-[#1A2E2B]/30 animate-bounce"
-                                 style="animation-delay: 150ms"/>
-                            <div class="w-2 h-2 rounded-full bg-[#1A2E2B]/30 animate-bounce"
-                                 style="animation-delay: 300ms"/>
+                            <div class="w-2 h-2 rounded-full bg-[#1A2E2B]/30 animate-bounce" style="animation-delay: 0ms"/>
+                            <div class="w-2 h-2 rounded-full bg-[#1A2E2B]/30 animate-bounce" style="animation-delay: 150ms"/>
+                            <div class="w-2 h-2 rounded-full bg-[#1A2E2B]/30 animate-bounce" style="animation-delay: 300ms"/>
                         </div>
                     </div>
                 </div>
+
+                <!-- ── Carte d'action suggérée par le coach ── -->
+                <div v-if="pendingAction && !isLoading"
+                     class="flex justify-start">
+                    <div class="w-8 h-8 flex-shrink-0 mr-2"/>
+                    <div class="max-w-[80%] bg-tema-green/5 border border-tema-green/20 rounded-2xl rounded-tl-sm p-4">
+
+                        <!-- Créer un objectif -->
+                        <div v-if="pendingAction.type === 'create_goal'">
+                            <p class="text-[12px] font-semibold text-tema-green mb-3">
+                                🎯 {{ locale === 'en' ? 'Create this goal?' : 'Créer cet objectif ?' }}
+                            </p>
+                            <div class="space-y-2 mb-3">
+                                <input type="text"
+                                       v-model="createGoalForm.label"
+                                       :placeholder="locale === 'en' ? 'Goal name' : 'Nom de l\'objectif'"
+                                       class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div class="relative">
+                                        <input type="number"
+                                               v-model.number="createGoalForm.target_amount"
+                                               :placeholder="locale === 'en' ? 'Target amount' : 'Montant cible'"
+                                               class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2 pr-12">
+                                        <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#1A2E2B]/40">FCFA</span>
+                                    </div>
+                                    <input type="date"
+                                           v-model="createGoalForm.target_date"
+                                           class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2">
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="dismissAction"
+                                        class="flex-1 py-2 rounded-xl border border-[#1A2E2B]/12 text-[12px] text-[#1A2E2B]/50">
+                                    {{ locale === 'en' ? 'Dismiss' : 'Ignorer' }}
+                                </button>
+                                <button @click="submitGoalFromChat"
+                                        :disabled="!createGoalForm.label || !createGoalForm.target_amount || createGoalForm.processing"
+                                        class="flex-1 py-2 rounded-xl bg-tema-green text-white text-[12px] font-semibold disabled:opacity-40">
+                                    {{ createGoalForm.processing ? '...' : (locale === 'en' ? 'Create goal' : 'Créer l\'objectif') }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Enregistrer une transaction -->
+                        <div v-else-if="pendingAction.type === 'create_transaction'">
+                            <p class="text-[12px] font-semibold text-tema-green mb-3">
+                                💸 {{ locale === 'en' ? 'Record this transaction?' : 'Enregistrer cette transaction ?' }}
+                            </p>
+                            <div class="space-y-2 mb-3">
+                                <div class="flex gap-2">
+                                    <button @click="createTransactionForm.direction = 'out'"
+                                            class="flex-1 py-1.5 rounded-xl text-[12px] font-semibold border-[1.5px] transition-all"
+                                            :class="createTransactionForm.direction === 'out'
+                                                ? 'border-tema-brick bg-tema-brick/8 text-tema-brick'
+                                                : 'border-[#1A2E2B]/10 text-[#1A2E2B]/50'">
+                                        {{ locale === 'en' ? '↑ Out' : '↑ Sortie' }}
+                                    </button>
+                                    <button @click="createTransactionForm.direction = 'in'"
+                                            class="flex-1 py-1.5 rounded-xl text-[12px] font-semibold border-[1.5px] transition-all"
+                                            :class="createTransactionForm.direction === 'in'
+                                                ? 'border-tema-green bg-tema-green/8 text-tema-green'
+                                                : 'border-[#1A2E2B]/10 text-[#1A2E2B]/50'">
+                                        {{ locale === 'en' ? '↓ In' : '↓ Entrée' }}
+                                    </button>
+                                </div>
+                                <div class="relative">
+                                    <input type="number"
+                                           v-model.number="createTransactionForm.amount"
+                                           :placeholder="locale === 'en' ? 'Amount' : 'Montant'"
+                                           class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2 pr-12">
+                                    <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#1A2E2B]/40">FCFA</span>
+                                </div>
+                                <input type="text"
+                                       v-model="createTransactionForm.note"
+                                       :placeholder="locale === 'en' ? 'Note (optional)' : 'Note (optionnel)'"
+                                       class="w-full text-[12px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2">
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="dismissAction"
+                                        class="flex-1 py-2 rounded-xl border border-[#1A2E2B]/12 text-[12px] text-[#1A2E2B]/50">
+                                    {{ locale === 'en' ? 'Dismiss' : 'Ignorer' }}
+                                </button>
+                                <button @click="submitTransactionFromChat"
+                                        :disabled="!createTransactionForm.amount || createTransactionForm.processing"
+                                        class="flex-1 py-2 rounded-xl bg-tema-green text-white text-[12px] font-semibold disabled:opacity-40">
+                                    {{ createTransactionForm.processing ? '...' : (locale === 'en' ? 'Record' : 'Enregistrer') }}
+                                </button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -243,15 +381,13 @@ function formatTime(dateStr) {
                           style="field-sizing: content; min-height: 42px;"/>
                 <button @click="sendMessage()"
                         :disabled="!inputMessage.trim() || isLoading"
-                        class="bg-tema-green text-white w-11 h-11 rounded-xl flex items-center justify-center hover:bg-tema-green-light transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
+                        class="bg-tema-green text-white w-11 h-11 rounded-xl flex items-center justify-center hover:bg-tema-green-light transition-all disabled:opacity-40 flex-shrink-0">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
                         <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/>
                     </svg>
                 </button>
             </div>
-            <p class="text-[11px] text-[#1A2E2B]/30 text-center mt-2">
-                {{ t('send_hint') }}
-            </p>
+            <p class="text-[11px] text-[#1A2E2B]/30 text-center mt-2">{{ t('send_hint') }}</p>
         </div>
 
     </div>

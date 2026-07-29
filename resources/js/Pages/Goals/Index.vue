@@ -63,6 +63,24 @@ function formatFcfa(amount) {
     return new Intl.NumberFormat('fr-FR').format(Math.round(amount ?? 0)) + ' FCFA';
 }
 
+function granularityLabel(granularite) {
+    const map = {
+        'jour': locale.value === 'en' ? 'day' : 'jour',
+        'semaine': locale.value === 'en' ? 'week' : 'semaine',
+        'mois': locale.value === 'en' ? 'month' : 'mois',
+        'day': locale.value === 'en' ? 'day' : 'jour',
+        'week': locale.value === 'en' ? 'week' : 'semaine',
+        'month': locale.value === 'en' ? 'month' : 'mois',
+    };
+    return map[granularite] ?? (locale.value === 'en' ? 'month' : 'mois');
+}
+
+function durationLabel(est) {
+    const periods = est.duree_periods ?? est.duree_mois;
+    const unit    = granularityLabel(est.granularite ?? 'mois');
+    return `${periods} ${unit}${periods > 1 && locale.value === 'fr' ? 's' : ''}`;
+}
+
 function formatDate(dateStr) {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleDateString(locale.value === 'en' ? 'en-GB' : 'fr-FR', {
@@ -267,9 +285,24 @@ function progressColor(percent) {
                         <p class="text-[11px] text-[#1A2E2B]/60 mb-2">
                             {{ estimations[goal.id].estimation.commentaire }}
                         </p>
+                        <!-- Badge réalisable / non réalisable -->
+                        <div v-if="estimations[goal.id].estimation.realisable !== undefined"
+                             class="mb-2 text-center">
+                            <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                                  :class="estimations[goal.id].estimation.realisable
+                                      ? 'bg-tema-green/10 text-tema-green'
+                                      : 'bg-tema-brick/10 text-tema-brick'">
+                                {{ estimations[goal.id].estimation.realisable
+                                    ? (locale === 'en' ? '✓ Achievable before target date' : '✓ Réalisable avant la date cible')
+                                    : (locale === 'en' ? '⚠ Not achievable before target date' : '⚠ Non réalisable avant la date cible') }}
+                            </span>
+                        </div>
+
                         <div class="flex gap-2 text-[11px]">
                             <div class="flex-1 text-center">
-                                <p class="text-[#1A2E2B]/40">/ {{ t('freq_monthly') }}</p>
+                                <p class="text-[#1A2E2B]/40">
+                                    / {{ granularityLabel(estimations[goal.id].estimation.granularite) }}
+                                </p>
                                 <p class="font-semibold text-tema-green">
                                     {{ formatFcfa(estimations[goal.id].estimation.montant_epargne_suggere) }}
                                 </p>
@@ -277,7 +310,7 @@ function progressColor(percent) {
                             <div class="flex-1 text-center border-x border-[#1A2E2B]/8">
                                 <p class="text-[#1A2E2B]/40">{{ t('duration') }}</p>
                                 <p class="font-semibold text-[#1A2E2B]">
-                                    {{ estimations[goal.id].estimation.duree_mois }} {{ t('months') }}
+                                    {{ durationLabel(estimations[goal.id].estimation) }}
                                 </p>
                             </div>
                             <div class="flex-1 text-center">
