@@ -36,6 +36,11 @@ function formatFcfa(amount) {
 // ─── Santé financière ───────────────────────────────────────────────
 const showHealthDetail = ref(false);
 
+const urgentAlerts = computed(() =>
+    (props.recommendations ?? []).filter(r => r.priority === 1)
+);
+const showAlerts = ref(false);
+
 const healthConfig = computed(() => {
     switch (props.healthStatus) {
         case 'stable':   return { label: t('status_stable'), color: 'text-tema-green', bg: 'bg-tema-green' };
@@ -254,9 +259,48 @@ function durationLabel(est) {
                     </h1>
                     <p class="text-[11px] text-tema-dark/40">{{ t('tagline') }}</p>
                 </div>
-                <button @click="router.get(route('profile.edit'))"
-                        class="w-9 h-9 rounded-full bg-tema-green/10 text-tema-green font-semibold text-[13px] flex items-center justify-center hover:bg-tema-green/20 transition-all">
-                    P
+                <div class="flex items-center gap-2">
+                    <!-- Cloche alertes urgentes -->
+                    <button v-if="urgentAlerts.length > 0"
+                            @click="showAlerts = !showAlerts"
+                            class="relative w-9 h-9 rounded-full bg-tema-brick/8 flex items-center justify-center hover:bg-tema-brick/15 transition-all">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                             class="w-4 h-4 text-tema-brick">
+                            <path fill-rule="evenodd" d="M5.25 9a6.75 6.75 0 0113.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 01-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 11-7.48 0 24.585 24.585 0 01-4.831-1.244.75.75 0 01-.298-1.205A8.217 8.217 0 005.25 9.75V9z" clip-rule="evenodd"/>
+                        </svg>
+                        <span class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-tema-brick text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                            {{ urgentAlerts.length }}
+                        </span>
+                    </button>
+
+                    <!-- Avatar profil -->
+                    <button @click="router.get(route('profile.edit'))"
+                            class="w-9 h-9 rounded-full bg-tema-green/10 text-tema-green font-semibold text-[13px] flex items-center justify-center hover:bg-tema-green/20 transition-all">
+                        P
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panneau alertes urgentes -->
+        <div v-if="showAlerts && urgentAlerts.length > 0"
+             class="max-w-2xl mx-auto px-4 pt-2">
+            <div class="bg-tema-brick/5 border border-tema-brick/20 rounded-2xl p-4 space-y-3">
+                <div class="flex justify-between items-center">
+                    <p class="text-[12px] font-semibold text-tema-brick uppercase tracking-widest">
+                        ⚠️ {{ urgentAlerts.length }} {{ locale === 'en' ? 'urgent alert(s)' : 'alerte(s) urgente(s)' }}
+                    </p>
+                    <button @click="showAlerts = false"
+                            class="text-[12px] text-tema-brick/50 hover:text-tema-brick">✕</button>
+                </div>
+                <div v-for="alert in urgentAlerts" :key="alert.rule_id"
+                     class="flex gap-2 pb-2 border-b border-tema-brick/10 last:border-0 last:pb-0">
+                    <span class="text-base flex-shrink-0">🔴</span>
+                    <p class="text-[13px] text-tema-brick/80 leading-relaxed">{{ alert.message }}</p>
+                </div>
+                <button @click="showAlerts = false; router.get(route('coach.index'))"
+                        class="w-full text-[12px] text-tema-brick font-semibold border border-tema-brick/20 rounded-xl py-2 hover:bg-tema-brick/5 transition-all">
+                    {{ locale === 'en' ? 'Talk to my coach →' : 'Parler à mon coach →' }}
                 </button>
             </div>
         </div>
