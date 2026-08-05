@@ -24,11 +24,82 @@ class FinancialCalculatorService
                 ? $profile->remaining_snapshot_date
                 : Carbon::parse($profile->remaining_snapshot_date);
 
-            return $snapshotDate->month === now()->month
-                && $snapshotDate->year === now()->year;
+            // Bug 1 : le snapshot est valable pour le CYCLE financier en cours
+            // (salary_day → salary_day), pas pour le mois calendaire.
+            [$start, $end] = $this->getFinancialCycleRange();
+
+            return $snapshotDate->gte($start) && $snapshotDate->lt($end);
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Bug 1 — Cycle financier
+     * Début du cycle en cours : le salary_day du mois (ou du mois précédent
+     * si on n'a pas encore atteint le salary_day ce mois-ci).
+     * Non salarié / pas de salary_day : le cycle = le mois calendaire.
+     *
+     * @param Carbon|null $reference date de référence (par défaut : maintenant)
+     */
+    public function getFinancialCycleStart(?Carbon $reference = null): Carbon
+    {
+        $reference = $reference ? $reference->copy() : now();
+        $profile   = $this->user->profile;
+
+        if ($profile?->employment_type === 'salaried' && $profile?->salary_day) {
+            $salaryDay = (int) $profile->salary_day;
+
+            // Ancrage du salary_day sur le mois de référence (borné au nb de jours du mois)
+            $anchorThisMonth = $reference->copy()
+                ->setDay(min($salaryDay, $reference->daysInMonth))
+                ->startOfDay();
+
+            // Si on a déjà atteint le salary_day, le cycle a commencé ce mois-ci
+            if ($reference->gte($anchorThisMonth)) {
+                return $anchorThisMonth;
+            }
+
+            // Sinon, il a commencé au salary_day du mois précédent
+            $prevMonth = $reference->copy()->subMonthNoOverflow();
+
+            return $prevMonth
+                ->setDay(min($salaryDay, $prevMonth->daysInMonth))
+                ->startOfDay();
+        }
+
+        return $reference->copy()->startOfMonth();
+    }
+
+    /**
+     * Bug 1 — Fin du cycle financier (borne EXCLUSIVE = début du cycle suivant).
+     * Correspond au prochain salary_day.
+     */
+    public function getFinancialCycleEnd(?Carbon $reference = null): Carbon
+    {
+        $reference = $reference ? $reference->copy() : now();
+        $profile   = $this->user->profile;
+
+        if ($profile?->employment_type === 'salaried' && $profile?->salary_day) {
+            $salaryDay = (int) $profile->salary_day;
+            $start     = $this->getFinancialCycleStart($reference);
+            $nextMonth = $start->copy()->addMonthNoOverflow();
+
+            return $nextMonth
+                ->setDay(min($salaryDay, $nextMonth->daysInMonth))
+                ->startOfDay();
+        }
+
+        return $reference->copy()->endOfMonth();
+    }
+
+    /**
+     * Bug 1 — Bornes [début, fin_exclusive] du cycle financier en cours.
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    public function getFinancialCycleRange(): array
+    {
+        return [$this->getFinancialCycleStart(), $this->getFinancialCycleEnd()];
     }
 
     /**
@@ -89,21 +160,10 @@ class FinancialCalculatorService
      */
     public function getDaysLeftInFinancialMonth(): int
     {
-        $profile = $this->user->profile;
+        // Jours restants jusqu'au prochain salary_day (fin du cycle en cours).
+        $end = $this->getFinancialCycleEnd();
 
-        if ($profile?->employment_type === 'salaried' && $profile?->salary_day) {
-            $salaryDay = (int) $profile->salary_day;
-            $today     = now()->day;
-
-            if ($today < $salaryDay) {
-                return $salaryDay - $today;
-            } else {
-                $nextPayday = now()->copy()->addMonth()->setDay($salaryDay);
-                return (int) now()->diffInDays($nextPayday);
-            }
-        }
-
-        return now()->daysInMonth - now()->day;
+        return max(0, (int) now()->startOfDay()->diffInDays($end->copy()->startOfDay()));
     }
 
     /**
@@ -143,10 +203,12 @@ class FinancialCalculatorService
      */
     public function getCurrentMonthVariableSpending(): float
     {
+        [$start, $end] = $this->getFinancialCycleRange();
+
         return (float) $this->user->transactions()
             ->where('direction', 'out')
-            ->whereMonth('transacted_at', now()->month)
-            ->whereYear('transacted_at', now()->year)
+            ->where('transacted_at', '>=', $start)
+            ->where('transacted_at', '<', $end)
             ->sum('amount');
     }
 
@@ -155,10 +217,12 @@ class FinancialCalculatorService
      */
     public function getCurrentMonthTransactionsIn(): float
     {
+        [$start, $end] = $this->getFinancialCycleRange();
+
         return (float) $this->user->transactions()
             ->where('direction', 'in')
-            ->whereMonth('transacted_at', now()->month)
-            ->whereYear('transacted_at', now()->year)
+            ->where('transacted_at', '>=', $start)
+            ->where('transacted_at', '<', $end)
             ->sum('amount');
     }
 
@@ -178,10 +242,12 @@ class FinancialCalculatorService
      */
     public function getCurrentMonthSpendingByCategory(): array
     {
+        [$start, $end] = $this->getFinancialCycleRange();
+
         return $this->user->transactions()
             ->where('direction', 'out')
-            ->whereMonth('transacted_at', now()->month)
-            ->whereYear('transacted_at', now()->year)
+            ->where('transacted_at', '>=', $start)
+            ->where('transacted_at', '<', $end)
             ->with('category')
             ->get()
             ->groupBy('category.name')
@@ -244,11 +310,13 @@ class FinancialCalculatorService
             ->where('is_active', true)
             ->get()
             ->map(function ($charge) {
+                [$start, $end] = $this->getFinancialCycleRange();
+
                 $spent = $this->user->transactions()
                     ->where('fixed_charge_id', $charge->id)
                     ->where('direction', 'out')
-                    ->whereMonth('transacted_at', now()->month)
-                    ->whereYear('transacted_at', now()->year)
+                    ->where('transacted_at', '>=', $start)
+                    ->where('transacted_at', '<', $end)
                     ->sum('amount');
 
                 $budget = $charge->monthly_equivalent;
@@ -311,6 +379,50 @@ class FinancialCalculatorService
             ->with('cycle.group')
             ->get()
             ->toArray();
+    }
+
+    /**
+     * Bug 2 — Prochain jour de paie (= fin du cycle en cours / début du suivant).
+     */
+    public function getNextPayday(): Carbon
+    {
+        return $this->getFinancialCycleEnd();
+    }
+
+    /**
+     * Bug 2 — Fenêtre de déclaration de salaire.
+     * S'ouvre à salary_day - 2 et reste ouverte tant que l'utilisateur
+     * n'a pas confirmé la réception (le salaire peut arriver en retard).
+     * Aucune réinitialisation automatique : seule la confirmation compte.
+     */
+    public function isSalaryDeclarationWindow(): bool
+    {
+        $profile = $this->user->profile;
+
+        if ($profile?->employment_type !== 'salaried' || !$profile?->salary_day) {
+            return false;
+        }
+
+        $windowOpens = $this->getNextPayday()->copy()->subDays(2)->startOfDay();
+
+        if (now()->lt($windowOpens)) {
+            return false;
+        }
+
+        return !$this->hasSalaryBeenDeclaredForNextCycle();
+    }
+
+    /**
+     * Bug 2 — Le salaire du prochain cycle a-t-il déjà été déclaré ?
+     * On considère « déclaré » tout revenu enregistré depuis l'ouverture de la fenêtre.
+     */
+    public function hasSalaryBeenDeclaredForNextCycle(): bool
+    {
+        $windowOpens = $this->getNextPayday()->copy()->subDays(2)->startOfDay();
+
+        return $this->user->incomeRecords()
+            ->where('received_at', '>=', $windowOpens)
+            ->exists();
     }
 
     // Compatibilité — plus utilisé mais gardé pour éviter les erreurs

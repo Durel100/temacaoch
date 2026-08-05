@@ -183,7 +183,13 @@ class FinancialGoalController extends Controller
             ? min($remaining / $periodsLeft, $maxSavingsPerMonth / ($granularity === 'day' ? 30 : ($granularity === 'week' ? 4 : 1)))
             : null;
 
+        $today       = now();
+        $todayStr    = $today->toDateString();
+        $currentYear = $today->year;
+
         $context = [
+            'date_aujourdhui' => $todayStr,
+            'annee_en_cours'  => $currentYear,
             'objectif' => [
                 'label'              => $goal->label,
                 'montant_cible'      => $goal->target_amount,
@@ -208,6 +214,8 @@ class FinancialGoalController extends Controller
         if ($locale === 'en') {
             $systemPrompt = "You are TemaCoach, a financial coach in Cameroon. All amounts are in FCFA (never euros).
 
+TEMPORAL CONTEXT: today's date is {$todayStr} (current year: {$currentYear}). Any date you generate (date_estimee) MUST be after today and use the real current year — NEVER use a past year.
+
 RULES:
 1. The user has a TARGET DATE. Determine if it's realistic first.
 2. If there are {$daysLeft} days left, suggest savings PER {$granularityEn} (not per month).
@@ -226,6 +234,8 @@ Respond ONLY in JSON:
 }";
         } else {
             $systemPrompt = "Tu es TemaCoach, un coach financier au Cameroun. Les montants sont en FCFA (jamais en euros).
+
+CONTEXTE TEMPOREL : nous sommes aujourd'hui le {$todayStr} (année en cours : {$currentYear}). Toute date que tu génères (date_estimee) DOIT être postérieure à aujourd'hui et utiliser l'année réelle en cours — n'utilise JAMAIS une année passée.
 
 RÈGLES :
 1. L'utilisateur a une DATE CIBLE. Détermine d'abord si c'est réalisable.

@@ -13,6 +13,7 @@ class ChatMessage extends Model
 
     protected $casts = [
         'context_snapshot' => 'array',
+        'action'           => 'array',
     ];
 
     public function conversation(): BelongsTo

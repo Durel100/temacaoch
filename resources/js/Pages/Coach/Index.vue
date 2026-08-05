@@ -140,6 +140,19 @@ function dismissAction() {
     pendingAction.value = null;
 }
 
+function pushFormError(errors) {
+    // Bug 6 : ne plus échouer en silence — afficher l'erreur de validation dans le chat
+    const first = Object.values(errors ?? {})[0]
+        ?? (locale.value === 'en' ? 'Could not save. Please try again.' : "Impossible d'enregistrer. Réessaie.");
+    messages.value.push({
+        id:         Date.now(),
+        role:       'assistant',
+        content:    first,
+        created_at: new Date().toISOString(),
+    });
+    scrollToBottom();
+}
+
 function submitChargeFromChat() {
     createChargeForm.post(route('finances.charges.store'), {
         onSuccess: () => {
@@ -156,26 +169,31 @@ function submitChargeFromChat() {
             createChargeForm.reset();
             scrollToBottom();
         },
+        onError: (errors) => pushFormError(errors),
     });
 }
 
 function submitGoalFromChat() {
-    createGoalForm.post(route('goals.store'), {
-        onSuccess: () => {
-            pendingAction.value = null;
-            const successMsg = locale.value === 'en'
-                ? `Goal "${createGoalForm.label}" created! You can now find it in your goals.`
-                : `Objectif "${createGoalForm.label}" créé ! Tu peux maintenant le retrouver dans tes objectifs.`;
-            messages.value.push({
-                id:         Date.now(),
-                role:       'assistant',
-                content:    successMsg,
-                created_at: new Date().toISOString(),
-            });
-            createGoalForm.reset();
-            scrollToBottom();
-        },
-    });
+    // Bug 6 : target_date vide ('') casse la validation `date` — on envoie null
+    createGoalForm
+        .transform((data) => ({ ...data, target_date: data.target_date || null }))
+        .post(route('goals.store'), {
+            onSuccess: () => {
+                pendingAction.value = null;
+                const successMsg = locale.value === 'en'
+                    ? `Goal "${createGoalForm.label}" created! You can now find it in your goals.`
+                    : `Objectif "${createGoalForm.label}" créé ! Tu peux maintenant le retrouver dans tes objectifs.`;
+                messages.value.push({
+                    id:         Date.now(),
+                    role:       'assistant',
+                    content:    successMsg,
+                    created_at: new Date().toISOString(),
+                });
+                createGoalForm.reset();
+                scrollToBottom();
+            },
+            onError: (errors) => pushFormError(errors),
+        });
 }
 
 function submitTransactionFromChat() {
@@ -194,8 +212,10 @@ function submitTransactionFromChat() {
             createTransactionForm.reset();
             scrollToBottom();
         },
+        onError: (errors) => pushFormError(errors),
     });
 }
+
 </script>
 
 <template>

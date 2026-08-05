@@ -123,13 +123,16 @@ class CoachController extends Controller
             'charges_fixes' => $chargesDetail,
         ];
 
-        // ── Statistiques du mois en cours ─────────────────────────────────────
+        // ── Statistiques du cycle financier en cours ─────────────────────────
+        // Aligné sur le cycle salary_day (cohérent avec le dashboard), pas sur
+        // le mois calendaire.
         $now   = now();
-        $start = $now->copy()->startOfMonth();
-        $end   = $now->copy()->endOfMonth();
+        $start = $calculator->getFinancialCycleStart();
+        $end   = $calculator->getFinancialCycleEnd(); // borne exclusive
 
         $monthTransactions = $user->transactions()
-            ->whereBetween('transacted_at', [$start, $end])
+            ->where('transacted_at', '>=', $start)
+            ->where('transacted_at', '<', $end)
             ->with('category')
             ->get();
 
@@ -156,21 +159,25 @@ class CoachController extends Controller
             ->take(5)
             ->toArray();
 
-        // Comparaison mois précédent
-        $prevStart = $now->copy()->subMonth()->startOfMonth();
-        $prevEnd   = $now->copy()->subMonth()->endOfMonth();
-        $prevTr    = $user->transactions()->whereBetween('transacted_at', [$prevStart, $prevEnd])->get();
+        // Comparaison cycle précédent
+        $prevEnd   = $start;                                              // fin exclusive = début du cycle courant
+        $prevStart = $calculator->getFinancialCycleStart($start->copy()->subDay());
+        $prevTr    = $user->transactions()
+            ->where('transacted_at', '>=', $prevStart)
+            ->where('transacted_at', '<', $prevEnd)
+            ->get();
         $prevOut   = $prevTr->where('direction', 'out')->sum('amount');
         $prevIn    = $prevTr->where('direction', 'in')->sum('amount');
 
-        // Habitudes
-        $daysElapsed = $now->day;
-        $dailyAvgOut = $daysElapsed > 0 ? round($totalOut / $daysElapsed) : 0;
+        // Habitudes (rapportées au cycle, pas au mois calendaire)
+        $cycleLength = max(1, (int) $start->diffInDays($end));
+        $daysElapsed = max(1, (int) $start->diffInDays($now) + 1);
+        $daysElapsed = min($daysElapsed, $cycleLength);
+        $daysLeft    = max(0, $cycleLength - $daysElapsed);
+        $dailyAvgOut = round($totalOut / $daysElapsed);
 
-        // Prévision fin de mois
-        $forecastOut = $daysElapsed > 0
-            ? round($totalOut + ($dailyAvgOut * ($now->daysInMonth - $daysElapsed)))
-            : null;
+        // Prévision fin de cycle
+        $forecastOut = round($totalOut + ($dailyAvgOut * $daysLeft));
 
         // Jour le plus dépensier
         $busiestDay = $monthTransactions->where('direction', 'out')
@@ -345,13 +352,32 @@ N'inclus QU'UN SEUL bloc action et seulement si l'utilisateur mentionne explicit
                 return response()->json(['error' => 'Réponse vide de l\'API.'], 500);
             }
 
+            // ── Bug 4 : extraire le bloc <action>...</action> et le retirer du texte ──
+            // Le flag /s permet au . de matcher les sauts de ligne éventuels.
+            $action = null;
+            if (preg_match('/<action>\s*(\{.*?\})\s*<\/action>/s', $aiResponse, $am)) {
+                $decoded = json_decode($am[1], true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded) && isset($decoded['type'])) {
+                    $action = $decoded;
+                }
+            }
+
+            // On retire TOUJOURS le(s) bloc(s) action du texte affiché,
+            // même si le JSON est malformé, pour ne rien laisser fuiter dans la bulle.
+            $cleanText = preg_replace('/<action>.*?<\/action>/s', '', $aiResponse);
+            $cleanText = trim($cleanText);
+
             $assistantMessage = $conversation->messages()->create([
                 'role'             => 'assistant',
-                'content'          => $aiResponse,
+                'content'          => $cleanText,
+                'action'           => $action,
                 'context_snapshot' => $context,
             ]);
 
-            return response()->json(['message' => $assistantMessage]);
+            return response()->json([
+                'message' => $assistantMessage,
+                'action'  => $action,
+            ]);
 
         } catch (\Exception $e) {
             \Log::error('Coach error', ['message' => $e->getMessage()]);
@@ -396,15 +422,16 @@ N'inclus QU'UN SEUL bloc action et seulement si l'utilisateur mentionne explicit
         } elseif (preg_match('/du\s+(\d+)\w*\s+au\s+(\d+)\w*\s+(\w+)/ui', $message, $m)) {
             $monthNum = $monthNames[strtolower($m[3])] ?? null;
             if ($monthNum) {
-                $year  = preg_match('/(202\d)/', $message, $ym) ? (int)$ym[1] : $now->year;
+                $year  = preg_match('/\b(202\d)\b/', $message, $ym) ? (int)$ym[1] : $now->year;
                 $start = \Carbon\Carbon::create($year, $monthNum, (int)$m[1])->startOfDay();
                 $end   = \Carbon\Carbon::create($year, $monthNum, (int)$m[2])->endOfDay();
                 $label = "du {$m[1]} au {$m[2]} {$m[3]}";
             }
         } else {
             foreach ($monthNames as $name => $num) {
-                if (preg_match('/' . preg_quote($name, '/') . '/i', $message)) {
-                    $year  = preg_match('/(202\d)/', $message, $ym) ? (int)$ym[1] : $now->year;
+                // Bornes Unicode : "mai" ne doit pas matcher dans "jamais", etc.
+                if (preg_match('/(?<!\p{L})' . preg_quote($name, '/') . '(?!\p{L})/iu', $message)) {
+                    $year  = preg_match('/\b(202\d)\b/', $message, $ym) ? (int)$ym[1] : $now->year;
                     $start = \Carbon\Carbon::create($year, $num, 1)->startOfMonth();
                     $end   = \Carbon\Carbon::create($year, $num, 1)->endOfMonth();
                     $label = $start->translatedFormat('F Y');

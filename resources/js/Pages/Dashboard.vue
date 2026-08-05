@@ -27,10 +27,27 @@ const props = defineProps({
     fixedChargesSurplus:     Number,
     goals:                   Array,
     employmentType:          String,
+    salaryDeclarationWindow: Boolean,
+    nextPayday:              String,
 });
 
 function formatFcfa(amount) {
     return new Intl.NumberFormat('fr-FR').format(Math.round(amount ?? 0)) + ' FCFA';
+}
+
+// ─── Bug 2 : déclaration du salaire reçu ────────────────────────────
+const showSalaryForm = ref(false);
+const salaryForm = useForm({ amount: null });
+
+function declareSalary() {
+    if (!salaryForm.amount || salaryForm.amount <= 0) return;
+    salaryForm.post(route('salary.declare'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            showSalaryForm.value = false;
+            salaryForm.reset();
+        },
+    });
 }
 
 // ─── Santé financière ───────────────────────────────────────────────
@@ -585,6 +602,37 @@ function durationLabel(est) {
                     <span class="text-[11px] text-tema-dark/40 bg-[#FAF6F0] rounded-full px-2.5 py-1">
                         {{ daysLeftInMonth }} {{ t('days_remaining') }}
                     </span>
+                </div>
+
+                <!-- Bug 2 : déclaration du salaire (fenêtre J-2 avant la paie) -->
+                <div v-if="salaryDeclarationWindow" class="mb-4">
+                    <button v-if="!showSalaryForm"
+                            @click="showSalaryForm = true"
+                            class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-tema-green/10 text-tema-green rounded-xl text-[13px] font-semibold hover:bg-tema-green/15 transition-all">
+                        💰 {{ locale === 'en' ? 'I received my salary' : "J'ai reçu mon salaire" }}
+                    </button>
+
+                    <div v-else class="bg-tema-green/8 rounded-xl p-3">
+                        <p class="text-[12px] text-tema-dark/60 mb-2">
+                            {{ locale === 'en' ? 'How much did you receive?' : 'Combien as-tu reçu ?' }}
+                        </p>
+                        <div class="flex items-center gap-2">
+                            <input type="number"
+                                   inputmode="numeric"
+                                   v-model.number="salaryForm.amount"
+                                   :placeholder="locale === 'en' ? 'Amount in FCFA' : 'Montant en FCFA'"
+                                   class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-tema-green/20 bg-white text-[14px] focus:outline-none focus:border-tema-green"/>
+                            <button @click="declareSalary"
+                                    :disabled="salaryForm.processing || !salaryForm.amount"
+                                    class="px-4 py-2 bg-tema-green text-white rounded-lg text-[13px] font-semibold disabled:opacity-40 whitespace-nowrap">
+                                {{ locale === 'en' ? 'Confirm' : 'Valider' }}
+                            </button>
+                            <button @click="showSalaryForm = false"
+                                    class="px-2 py-2 text-tema-dark/40 text-[15px]">
+                                ✕
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Montant principal -->
