@@ -27,6 +27,12 @@ function autoDetect() {
     form.value.salary_already_received = form.value.salary_day <= today;
 }
 
+function selectReceived(value) {
+    form.value.salary_already_received = value;
+    // On repart propre : le montant est requis dans les deux cas (Oui / Non)
+    form.value.current_month_remaining = null;
+}
+
 const budgetPreview = computed(() => {
     const remaining = form.value.current_month_remaining;
     const charges   = form.value.remaining_fixed_charges_this_month;
@@ -42,7 +48,7 @@ const canSubmit = computed(() => {
         if (!form.value.salary_day) return false;
         if (form.value.salary_already_received === null) return false;
         // ← Corrigé : vérifier null/undefined au lieu de falsy (0 est valide)
-        if (form.value.salary_already_received && form.value.current_month_remaining === null) return false;
+        if (form.value.current_month_remaining === null) return false;
     }
     return true;
 });
@@ -116,7 +122,7 @@ function submit() {
                                 ]"
                                     :key="String(opt.value)"
                                     type="button"
-                                    @click="form.salary_already_received = opt.value; if (!opt.value) form.current_month_remaining = null"
+                                    @click="selectReceived(opt.value)"
                                     class="flex flex-col items-center py-5 rounded-2xl border-[1.5px] transition-all"
                                     :class="form.salary_already_received === opt.value
                                         ? 'border-tema-green bg-tema-green/8'
@@ -130,12 +136,12 @@ function submit() {
                         </div>
                     </div>
 
-                    <div v-if="form.salary_already_received === true"
+                    <div v-if="form.salary_already_received !== null"
                          class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
                         <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-2">
-                            {{ t('how_much_left') }}
+                            {{ form.salary_already_received ? t('how_much_left') : t('how_much_left_prev_month') }}
                         </p>
-                        <p class="text-[13px] text-[#1A2E2B]/55 mb-4">{{ t('how_much_left_desc') }}</p>
+                        <p class="text-[13px] text-[#1A2E2B]/55 mb-4">{{ form.salary_already_received ? t('how_much_left_desc') : t('how_much_left_prev_month_desc') }}</p>
                         <div class="relative">
                             <input type="number"
                                    v-model.number="form.current_month_remaining"

@@ -624,4 +624,6 @@ export default {
     estimate_locked:         'Estimate unavailable',
     estimate_available_on:   'Available on',
     linked:                  'Linked',
+    how_much_left_prev_month:      'How much do you have left from last month?',
+    how_much_left_prev_month_desc:  'What you have to live on until your next payday.',
 };

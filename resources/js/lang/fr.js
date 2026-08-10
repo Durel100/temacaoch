@@ -627,4 +627,6 @@ export default {
     estimate_locked:         'Estimation indisponible',
     estimate_available_on:   'Disponible le',
     linked:                  'Lié',
+    how_much_left_prev_month:      'Combien te reste-t-il du mois précédent ?',
+    how_much_left_prev_month_desc:  'Ce qu\'il te reste pour vivre jusqu\'à ta prochaine paie.',
 };
