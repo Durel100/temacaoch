@@ -159,6 +159,12 @@ class OnboardingController extends Controller
             'remaining_snapshot_date'            => $validated['current_month_remaining'] !== null
                 ? now()->toDateString()
                 : null,
+            // Bug 2 : "Oui, déjà reçu" confirme la paie de ce cycle → le bouton
+            // "J'ai reçu mon salaire" ne s'affichera pas. "Non" laisse null → le
+            // bouton apparaîtra le jour de la paie.
+            'salary_received_at'                 => ($validated['salary_already_received'] ?? false)
+                ? now()
+                : null,
         ]);
 
         return redirect()->route('onboarding.habits');

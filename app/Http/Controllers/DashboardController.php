@@ -115,6 +115,7 @@ class DashboardController extends Controller
         $user->profile->update([
             'current_month_remaining' => $validated['amount'] + $leftover,
             'remaining_snapshot_date' => now(),
+            'salary_received_at'      => now(),
         ]);
 
         $message = $leftover > 0

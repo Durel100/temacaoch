@@ -8,6 +8,7 @@ use App\Http\Controllers\CoachController;
 use App\Http\Controllers\TontineController;
 use App\Http\Controllers\FinancialGoalController;
 use App\Http\Controllers\StatsController;
+use App\Http\Controllers\WeeklyReviewController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\AdminController;
 use Illuminate\Support\Facades\Route;
@@ -127,6 +128,7 @@ Route::middleware('auth')->group(function () {
 
         // ── Stats ────────────────────────────────────────────────────
         Route::get('/stats', [StatsController::class, 'index'])->name('stats.index');
+        Route::get('/stats/weekly-review', [WeeklyReviewController::class, 'show'])->name('stats.weekly-review');
 
 
     }); // fin middleware onboarding

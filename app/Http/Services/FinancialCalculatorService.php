@@ -391,9 +391,10 @@ class FinancialCalculatorService
 
     /**
      * Bug 2 — Fenêtre de déclaration de salaire.
-     * S'ouvre à salary_day - 2 et reste ouverte tant que l'utilisateur
-     * n'a pas confirmé la réception (le salaire peut arriver en retard).
-     * Aucune réinitialisation automatique : seule la confirmation compte.
+     * Ouverte à partir de (jour de paie du mois - 2) et tant que la paie du
+     * cycle courant n'est PAS confirmée (le salaire peut arriver en retard).
+     * Ancrée sur le salary_day du MOIS COURANT — surtout pas sur getNextPayday(),
+     * qui bascule déjà sur le mois suivant le jour de la paie.
      */
     public function isSalaryDeclarationWindow(): bool
     {
@@ -403,26 +404,46 @@ class FinancialCalculatorService
             return false;
         }
 
-        $windowOpens = $this->getNextPayday()->copy()->subDays(2)->startOfDay();
+        $salaryDay = (int) $profile->salary_day;
+        $today     = now();
 
-        if (now()->lt($windowOpens)) {
+        // Jour de paie de CE mois (borné au nb de jours du mois).
+        $thisMonthPayday = $today->copy()
+            ->setDay(min($salaryDay, $today->daysInMonth))
+            ->startOfDay();
+
+        // Avant J-2 de la paie de ce mois : rien à afficher.
+        if ($today->lt($thisMonthPayday->copy()->subDays(2))) {
             return false;
         }
 
-        return !$this->hasSalaryBeenDeclaredForNextCycle();
+        return !$this->hasSalaryBeenDeclaredForCurrentCycle();
     }
 
     /**
-     * Bug 2 — Le salaire du prochain cycle a-t-il déjà été déclaré ?
-     * On considère « déclaré » tout revenu enregistré depuis l'ouverture de la fenêtre.
+     * Bug 2 — La paie du cycle courant a-t-elle été confirmée ?
+     * Vrai si salary_received_at (posé à l'onboarding « Oui » ou par le bouton
+     * « J'ai reçu mon salaire ») tombe dans le cycle financier en cours.
      */
-    public function hasSalaryBeenDeclaredForNextCycle(): bool
+    public function hasSalaryBeenDeclaredForCurrentCycle(): bool
     {
-        $windowOpens = $this->getNextPayday()->copy()->subDays(2)->startOfDay();
+        $profile = $this->user->profile;
 
-        return $this->user->incomeRecords()
-            ->where('received_at', '>=', $windowOpens)
-            ->exists();
+        if (!$profile?->salary_received_at) {
+            return false;
+        }
+
+        try {
+            $receivedAt = $profile->salary_received_at instanceof Carbon
+                ? $profile->salary_received_at
+                : Carbon::parse($profile->salary_received_at);
+        } catch (\Exception $e) {
+            return false;
+        }
+
+        [$start, $end] = $this->getFinancialCycleRange();
+
+        return $receivedAt->gte($start) && $receivedAt->lt($end);
     }
 
     // Compatibilité — plus utilisé mais gardé pour éviter les erreurs

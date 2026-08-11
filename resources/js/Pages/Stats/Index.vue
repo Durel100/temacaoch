@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { router } from '@inertiajs/vue3';
 import { useTranslation } from '@/Composables/useTranslation';
+import axios from 'axios';
 
 const { t, locale, tCategoryName } = useTranslation();
 
@@ -96,6 +97,22 @@ const savingsColor = computed(() => {
 const visibleTransactions = computed(() =>
     showAllTr.value ? props.transactions : props.transactions.slice(0, 10)
 );
+
+// ─── Bilan hebdomadaire du coach ─────────────────────────
+const weeklyReview  = ref(null);
+const weeklyLoading = ref(true);
+const weeklyError   = ref(false);
+
+onMounted(async () => {
+    try {
+        const { data } = await axios.get(route('stats.weekly-review'));
+        weeklyReview.value = data.review;
+    } catch (e) {
+        weeklyError.value = true;
+    } finally {
+        weeklyLoading.value = false;
+    }
+});
 </script>
 
 <template>
@@ -141,6 +158,78 @@ const visibleTransactions = computed(() =>
                             class="w-full text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5">
                         <option v-for="y in [2024,2025,2026,2027]" :key="y" :value="y">{{ y }}</option>
                     </select>
+                </div>
+            </div>
+
+            <!-- Bilan de la semaine (coach) -->
+            <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="text-[16px]">🧭</span>
+                    <h2 class="font-display text-[15px] font-semibold text-[#1A2E2B]">
+                        {{ locale === 'en' ? 'Your week with TemaCoach' : 'Ta semaine avec TemaCoach' }}
+                    </h2>
+                </div>
+
+                <div v-if="weeklyLoading" class="flex items-center gap-2 text-[13px] text-[#1A2E2B]/50 py-3">
+                    <span class="w-4 h-4 border-2 border-tema-green/30 border-t-tema-green rounded-full animate-spin"></span>
+                    {{ locale === 'en' ? 'Preparing your review…' : 'Préparation de ton bilan…' }}
+                </div>
+
+                <p v-else-if="weeklyError" class="text-[13px] text-[#1A2E2B]/50 py-2">
+                    {{ locale === 'en' ? 'Review unavailable right now.' : 'Bilan indisponible pour le moment.' }}
+                </p>
+
+                <div v-else-if="weeklyReview" class="space-y-4">
+                    <p class="text-[14px] text-[#1A2E2B]/80 leading-relaxed">{{ weeklyReview.resume }}</p>
+
+                    <div v-if="weeklyReview.points_positifs?.length">
+                        <p class="text-[11px] font-semibold text-tema-green uppercase tracking-widest mb-1.5">
+                            {{ locale === 'en' ? 'Wins' : 'Points positifs' }}
+                        </p>
+                        <ul class="space-y-1">
+                            <li v-for="(item, i) in weeklyReview.points_positifs" :key="'p'+i"
+                                class="text-[13px] text-[#1A2E2B]/75 flex gap-2">
+                                <span class="text-tema-green">✓</span><span>{{ item }}</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div v-if="weeklyReview.alertes?.length">
+                        <p class="text-[11px] font-semibold text-tema-ocre uppercase tracking-widest mb-1.5">
+                            {{ locale === 'en' ? 'Watch-outs' : 'À surveiller' }}
+                        </p>
+                        <ul class="space-y-1">
+                            <li v-for="(item, i) in weeklyReview.alertes" :key="'a'+i"
+                                class="text-[13px] text-[#1A2E2B]/75 flex gap-2">
+                                <span class="text-tema-ocre">!</span><span>{{ item }}</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div v-if="weeklyReview.conseils?.length">
+                        <p class="text-[11px] font-semibold text-[#1A2E2B]/40 uppercase tracking-widest mb-1.5">
+                            {{ locale === 'en' ? 'Tips' : 'Conseils' }}
+                        </p>
+                        <ul class="space-y-1">
+                            <li v-for="(item, i) in weeklyReview.conseils" :key="'c'+i"
+                                class="text-[13px] text-[#1A2E2B]/75 flex gap-2">
+                                <span class="text-[#1A2E2B]/40">→</span><span>{{ item }}</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div v-if="weeklyReview.opportunites?.length" class="pt-1">
+                        <p class="text-[11px] font-semibold text-tema-green uppercase tracking-widest mb-2">
+                            {{ locale === 'en' ? 'Opportunities' : 'Opportunités' }}
+                        </p>
+                        <div class="space-y-2">
+                            <div v-for="(opp, i) in weeklyReview.opportunites" :key="'o'+i"
+                                 class="bg-tema-green/8 rounded-xl p-3">
+                                <p class="text-[13px] font-semibold text-[#1A2E2B]">{{ opp.titre }}</p>
+                                <p class="text-[12px] text-[#1A2E2B]/65 mt-0.5">{{ opp.detail }}</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
