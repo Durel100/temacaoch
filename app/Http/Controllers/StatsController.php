@@ -30,7 +30,22 @@ class StatsController extends Controller
         // Solde réel = resteAVivre déclaré + entrées - sorties
         $calculator  = new \App\Http\Services\FinancialCalculatorService($user);
         $resteAVivre = $calculator->getResteAVivre();
-        $balance     = $resteAVivre + $totalIn - $totalOut;
+
+        // Solde affiché = budget réel restant, basé sur le snapshot et CONTINU au fil
+        // des cycles (cohérent avec le dashboard). Avant, on faisait
+        // resteAVivre + entrées − sorties DE LA PÉRIODE, qui commence au salary_day :
+        // les dépenses du cycle précédent n'étaient pas déduites → le solde affichait
+        // le snapshot complet (~le salaire) même sans salaire reçu.
+        // Pour une période strictement passée, on montre le flux net de la période.
+        $viewingCurrent = match ($period) {
+            'today', 'week' => true,
+            'month'         => $year === (int) now()->year && $month === (int) now()->month,
+            default         => false, // 'year' et autres → flux net
+        };
+
+        $balance = $viewingCurrent
+            ? $calculator->getRealRemainingBudget()
+            : ($totalIn - $totalOut);
 
         // Taux d'épargne basé sur le revenu de référence
         $safeIncome  = $calculator->getSafeIncomeBaseline();
