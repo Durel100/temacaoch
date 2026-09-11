@@ -291,39 +291,6 @@ class TontineController extends Controller
 
     private function syncOverdraftDebt($user): void
     {
-        $user->load([
-            'profile', 'dependents', 'incomeSources',
-            'fixedCharges', 'debts', 'financialGoals', 'tontineGroups',
-        ]);
-
-        $calculator    = new FinancialCalculatorService($user);
-        $realRemaining = $calculator->getRealRemainingBudget();
-
-        $existingDebt = Debt::where('user_id', $user->id)
-            ->where('label', 'Découvert budget')
-            ->whereMonth('created_at', now()->month)
-            ->whereYear('created_at',  now()->year)
-            ->first();
-
-        if ($realRemaining >= 0) {
-            $existingDebt?->delete();
-            return;
-        }
-
-        $overdraftAmount = round(abs($realRemaining), 2);
-
-        if ($existingDebt) {
-            $existingDebt->update([
-                'remaining_amount' => $overdraftAmount,
-                'total_amount'     => max($existingDebt->total_amount, $overdraftAmount),
-            ]);
-        } else {
-            Debt::create([
-                'user_id'          => $user->id,
-                'label'            => 'Découvert budget',
-                'total_amount'     => $overdraftAmount,
-                'remaining_amount' => $overdraftAmount,
-            ]);
-        }
+        (new FinancialCalculatorService($user))->syncOverdraftDebt();
     }
 }

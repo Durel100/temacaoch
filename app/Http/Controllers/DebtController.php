@@ -32,4 +32,30 @@ class DebtController extends Controller
             : "Remboursement de " . number_format($validated['amount']) . " FCFA enregistré."
         );
     }
+
+    /**
+     * Modifier une dette (renommer, ajuster les montants).
+     * Fonctionne aussi pour la dette de découvert créée par le système —
+     * on ne modifie jamais le flag is_system, seulement les champs éditables.
+     */
+    public function update(Request $request, Debt $debt)
+    {
+        if ($debt->user_id !== $request->user()->id) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'label'            => 'required|string|max:255',
+            'total_amount'     => 'nullable|numeric|min:0',
+            'remaining_amount' => 'nullable|numeric|min:0',
+        ]);
+
+        $debt->update(array_filter([
+            'label'            => $validated['label'],
+            'total_amount'     => $validated['total_amount']     ?? null,
+            'remaining_amount' => $validated['remaining_amount'] ?? null,
+        ], fn ($v) => $v !== null));
+
+        return back()->with('success', "Dette mise à jour.");
+    }
 }

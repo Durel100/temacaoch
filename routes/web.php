@@ -10,6 +10,7 @@ use App\Http\Controllers\FinancialGoalController;
 use App\Http\Controllers\StatsController;
 use App\Http\Controllers\WeeklyReviewController;
 use App\Http\Controllers\FinanceController;
+use App\Http\Controllers\CategoryBudgetController;
 use App\Http\Controllers\AdminController;
 use Illuminate\Support\Facades\Route;
 
@@ -89,6 +90,7 @@ Route::middleware('auth')->group(function () {
             Route::get('/', [FinanceController::class, 'index'])->name('index');
             Route::post('/debts',                    [FinanceController::class, 'storeDette'])->name('debts.store');
             Route::post('/debts/{debt}/repay',       [FinanceController::class, 'repayDette'])->name('debts.repay');
+            Route::patch('/debts/{debt}',            [FinanceController::class, 'updateDette'])->name('debts.update');
             Route::delete('/debts/{debt}',           [FinanceController::class, 'destroyDette'])->name('debts.destroy');
             Route::post('/charges',                  [FinanceController::class, 'storeCharge'])->name('charges.store');
             Route::patch('/charges/{charge}/toggle', [FinanceController::class, 'toggleCharge'])->name('charges.toggle');
@@ -129,6 +131,10 @@ Route::middleware('auth')->group(function () {
         // ── Stats ────────────────────────────────────────────────────
         Route::get('/stats', [StatsController::class, 'index'])->name('stats.index');
         Route::get('/stats/weekly-review', [WeeklyReviewController::class, 'show'])->name('stats.weekly-review');
+
+        // ── Budgets par catégorie ────────────────────────────────────
+        Route::get('/category-budgets',  [CategoryBudgetController::class, 'index'])->name('category-budgets.index');
+        Route::post('/category-budgets', [CategoryBudgetController::class, 'update'])->name('category-budgets.update');
 
 
     }); // fin middleware onboarding

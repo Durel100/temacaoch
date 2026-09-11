@@ -8,11 +8,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Debt extends Model
 {
     protected $fillable = [
-        'user_id', 'label', 'total_amount', 'remaining_amount',
+        'user_id', 'label', 'is_system', 'total_amount', 'remaining_amount',
         'interest_rate', 'monthly_payment', 'due_date',
     ];
 
     protected $casts = [
+        'is_system' => 'boolean',
         'total_amount' => 'decimal:2',
         'remaining_amount' => 'decimal:2',
         'interest_rate' => 'decimal:2',

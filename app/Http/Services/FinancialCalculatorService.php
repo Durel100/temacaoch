@@ -24,11 +24,12 @@ class FinancialCalculatorService
                 ? $profile->remaining_snapshot_date
                 : Carbon::parse($profile->remaining_snapshot_date);
 
-            // Bug 1 : le snapshot est valable pour le CYCLE financier en cours
-            // (salary_day → salary_day), pas pour le mois calendaire.
-            [$start, $end] = $this->getFinancialCycleRange();
-
-            return $snapshotDate->gte($start) && $snapshotDate->lt($end);
+            // Le snapshot reste la source de vérité JUSQU'À la prochaine déclaration
+            // de salaire (qui pose un nouveau snapshot). Il ne « périme » plus au
+            // changement de cycle — sinon, le jour de la paie, le solde se
+            // réinitialiserait tout seul au salaire au lieu d'attendre la validation
+            // manuelle et de reporter le reliquat.
+            return $snapshotDate !== null;
         } catch (\Exception $e) {
             return false;
         }
@@ -227,11 +228,42 @@ class FinancialCalculatorService
     }
 
     /**
-     * Budget réel restant ce mois
-     * = reste à vivre − toutes les dépenses + toutes les entrées
+     * Début de la fenêtre budgétaire = date du dernier snapshot (onboarding ou
+     * dernière déclaration de salaire).
+     */
+    private function getSnapshotStart(): Carbon
+    {
+        $raw = $this->user->profile->remaining_snapshot_date;
+        return $raw instanceof Carbon ? $raw->copy() : Carbon::parse($raw);
+    }
+
+    /**
+     * Budget réel restant.
+     *
+     * En mode snapshot : solde du dernier snapshot − dépenses + entrées DEPUIS ce
+     * snapshot. Le calcul est CONTINU au fil des cycles — il ne se réinitialise pas
+     * tout seul au salary_day. Seule une déclaration de salaire (qui repose un
+     * snapshot = salaire + reliquat) le remet à zéro.
      */
     public function getRealRemainingBudget(): float
     {
+        if ($this->isSnapshotMode()) {
+            $since = $this->getSnapshotStart();
+
+            $spending = (float) $this->user->transactions()
+                ->where('direction', 'out')
+                ->where('transacted_at', '>=', $since)
+                ->sum('amount');
+
+            $in = (float) $this->user->transactions()
+                ->where('direction', 'in')
+                ->where('transacted_at', '>=', $since)
+                ->sum('amount');
+
+            return (float) $this->user->profile->current_month_remaining - $spending + $in;
+        }
+
+        // Hors snapshot : calcul sur le cycle financier (comportement historique).
         return $this->getResteAVivre()
             - $this->getCurrentMonthVariableSpending()
             + $this->getCurrentMonthTransactionsIn();
@@ -334,6 +366,44 @@ class FinancialCalculatorService
                     'surplus'   => max(0, $spent - $budget),
                 ];
             })->toArray();
+    }
+
+    /**
+     * Consommation du budget de chaque catégorie qui en a un défini,
+     * sur le cycle financier en cours. Même logique que getFixedChargesConsumption.
+     */
+    public function getCategoryBudgetsConsumption(): array
+    {
+        [$start, $end] = $this->getFinancialCycleRange();
+
+        return \App\Models\Category::where('user_id', $this->user->id)
+            ->whereNotNull('monthly_budget')
+            ->where('monthly_budget', '>', 0)
+            ->where('default_direction', 'out')
+            ->get()
+            ->map(function ($category) use ($start, $end) {
+                $spent = (float) $this->user->transactions()
+                    ->where('category_id', $category->id)
+                    ->where('direction', 'out')
+                    ->where('transacted_at', '>=', $start)
+                    ->where('transacted_at', '<', $end)
+                    ->sum('amount');
+
+                $budget = (float) $category->monthly_budget;
+
+                return [
+                    'id'        => $category->id,
+                    'label'     => $category->name,
+                    'budget'    => $budget,
+                    'spent'     => $spent,
+                    'remaining' => max(0, $budget - $spent),
+                    'percent'   => $budget > 0
+                        ? min(100, round(($spent / $budget) * 100))
+                        : 0,
+                    'is_over'   => $spent > $budget,
+                    'surplus'   => max(0, $spent - $budget),
+                ];
+            })->values()->toArray();
     }
 
     /**
@@ -446,7 +516,46 @@ class FinancialCalculatorService
         return $receivedAt->gte($start) && $receivedAt->lt($end);
     }
 
-    // Compatibilité — plus utilisé mais gardé pour éviter les erreurs
+    /**
+     * Dette de découvert — logique CENTRALISÉE (appelée par tous les contrôleurs).
+     * Crée la dette système UNE SEULE fois par cycle si le budget est négatif.
+     * Ne supprime, ne réduit et ne rembourse JAMAIS automatiquement : une fois
+     * créée, elle appartient à l'utilisateur (rembourser / renommer / supprimer à la main).
+     * Détection via is_system (jamais le label) → survit au renommage.
+     */
+    public function syncOverdraftDebt(): void
+    {
+        $realRemaining = $this->getRealRemainingBudget();
+
+        // Budget positif → on ne touche à rien.
+        if ($realRemaining >= 0) {
+            return;
+        }
+
+        [$start, $end] = $this->getFinancialCycleRange();
+
+        $exists = \App\Models\Debt::where('user_id', $this->user->id)
+            ->where('is_system', true)
+            ->where('created_at', '>=', $start)
+            ->where('created_at', '<', $end)
+            ->exists();
+
+        if ($exists) {
+            return;
+        }
+
+        \App\Models\Debt::create([
+            'user_id'          => $this->user->id,
+            'label'            => 'Découvert budget',
+            'is_system'        => true,
+            'total_amount'     => round(abs($realRemaining), 2),
+            'remaining_amount' => round(abs($realRemaining), 2),
+            'interest_rate'    => null,
+            'monthly_payment'  => null,
+        ]);
+    }
+
+        // Compatibilité — plus utilisé mais gardé pour éviter les erreurs
     public function getFixedChargesSurplus(): float { return 0; }
     public function getMonthlyTontineCost(): float { return 0; }
 }

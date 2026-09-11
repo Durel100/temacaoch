@@ -13,6 +13,13 @@ const props = defineProps({
 
 const mode = ref('quick');
 
+// Heure locale (Douala) au format datetime-local.
+// new Date().toISOString() renvoie l'UTC → décalage d'1h ; on retire l'offset du fuseau.
+function nowLocalDatetime() {
+    const d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 const form = ref({
     amount:          null,
     direction:       'out',
@@ -20,7 +27,7 @@ const form = ref({
     quick_action_id: null,
     fixed_charge_id: null,
     source:          'manual_custom',
-    transacted_at:   new Date().toISOString().slice(0, 16),
+    transacted_at:   nowLocalDatetime(),
     note:            '',
 });
 

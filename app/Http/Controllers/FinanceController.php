@@ -82,38 +82,12 @@ class FinanceController extends Controller
         $repayAmount  = min($validated['amount'], $debt->remaining_amount);
         $newRemaining = round($debt->remaining_amount - $repayAmount, 2);
 
-        // Mettre à jour le montant restant de la dette
         $debt->update(['remaining_amount' => $newRemaining]);
 
-        if ($debt->label === 'Découvert budget') {
-            // ── Dette de découvert : transaction "in" compensatoire ──────────
-            // Le découvert a déjà créé une réduction du budget via syncOverdraftDebt.
-            // Le remboursement crée une transaction entrante pour corriger le budget.
-            $category = Category::firstOrCreate(
-                ['name' => 'Remboursement découvert', 'user_id' => null],
-                [
-                    'icon'              => 'wallet',
-                    'default_direction' => 'in',
-                    'is_system'         => true,
-                    'translation_key'   => 'cat_overdraft_repay',
-                ]
-            );
-
-            Transaction::create([
-                'user_id'       => $user->id,
-                'amount'        => $repayAmount,
-                'direction'     => 'in',
-                'category_id'   => $category->id,
-                'transacted_at' => now(),
-                'source'        => 'manual_custom',
-                'note'          => 'Remboursement découvert budget',
-            ]);
-
-            $this->syncAfterRepay($user);
-
-        } else {
-            // ── Dette normale : transaction "out" pour débiter le budget ─────
-            // Le remboursement d'une dette normale sort de l'argent du compte.
+        // Dette système (découvert) : remboursement purement manuel — on réduit
+        // seulement le montant restant, aucun mouvement de budget ni suppression auto.
+        // Dette normale : le remboursement sort de l'argent du budget.
+        if (!$debt->is_system) {
             $category = Category::firstOrCreate(
                 ['name' => 'Remboursement dette', 'user_id' => null],
                 [
@@ -143,33 +117,26 @@ class FinanceController extends Controller
     }
 
     /**
-     * Resynchronise la dette de découvert après un remboursement
+     * Modifier une dette (renommer, ajuster les montants).
+     * Marche aussi pour la dette de découvert système — on ne touche jamais à is_system.
      */
-    private function syncAfterRepay($user): void
+    public function updateDette(Request $request, Debt $debt)
     {
-        $user->load([
-            'profile', 'dependents', 'incomeSources',
-            'fixedCharges', 'debts', 'financialGoals', 'tontineGroups',
+        if ($debt->user_id !== $request->user()->id) abort(403);
+
+        $validated = $request->validate([
+            'label'            => 'required|string|max:255',
+            'total_amount'     => 'nullable|numeric|min:0',
+            'remaining_amount' => 'nullable|numeric|min:0',
         ]);
 
-        $calculator    = new FinancialCalculatorService($user);
-        $realRemaining = $calculator->getRealRemainingBudget();
+        $debt->update(array_filter([
+            'label'            => $validated['label'],
+            'total_amount'     => $validated['total_amount']     ?? null,
+            'remaining_amount' => $validated['remaining_amount'] ?? null,
+        ], fn ($v) => $v !== null));
 
-        if ($realRemaining >= 0) {
-            // Budget repassé positif → supprimer la dette de découvert
-            Debt::where('user_id', $user->id)
-                ->where('label', 'Découvert budget')
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at', now()->year)
-                ->delete();
-        } else {
-            // Budget encore négatif → mettre à jour le montant restant
-            Debt::where('user_id', $user->id)
-                ->where('label', 'Découvert budget')
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at', now()->year)
-                ->update(['remaining_amount' => round(abs($realRemaining), 2)]);
-        }
+        return back()->with('success', 'Dette mise à jour.');
     }
 
     public function destroyDette(Request $request, Debt $debt)
@@ -245,38 +212,8 @@ class FinanceController extends Controller
             'note'           => 'Paiement : ' . $charge->label,
         ]);
 
-        // Sync découvert
-        $user->load([
-            'profile', 'dependents', 'incomeSources',
-            'fixedCharges', 'debts', 'financialGoals', 'tontineGroups',
-        ]);
-        $calculator    = new \App\Http\Services\FinancialCalculatorService($user);
-        $realRemaining = $calculator->getRealRemainingBudget();
-
-        $existingDebt = \App\Models\Debt::where('user_id', $user->id)
-            ->where('label', 'Découvert budget')
-            ->whereMonth('created_at', now()->month)
-            ->whereYear('created_at', now()->year)
-            ->first();
-
-        if ($realRemaining >= 0) {
-            $existingDebt?->delete();
-        } else {
-            $amount = round(abs($realRemaining), 2);
-            if ($existingDebt) {
-                $existingDebt->update([
-                    'remaining_amount' => $amount,
-                    'total_amount'     => max($existingDebt->total_amount, $amount),
-                ]);
-            } else {
-                \App\Models\Debt::create([
-                    'user_id'          => $user->id,
-                    'label'            => 'Découvert budget',
-                    'total_amount'     => $amount,
-                    'remaining_amount' => $amount,
-                ]);
-            }
-        }
+        // Sync découvert (logique centralisée — création unique, jamais de suppression auto)
+        (new \App\Http\Services\FinancialCalculatorService($user))->syncOverdraftDebt();
 
         return back()->with('success', 'Paiement enregistré — déduit de ton budget.');
     }

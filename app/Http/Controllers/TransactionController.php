@@ -140,59 +140,11 @@ class TransactionController extends Controller
     }
 
     /**
-     * Synchronise la dette de découvert selon le budget réel
-     * - Budget négatif → crée ou met à jour la dette "Découvert budget"
-     * - Budget positif → supprime la dette de découvert si elle existe
+     * Dette de découvert — délègue à la logique centralisée du service.
      */
     private function syncOverdraftDebt($user): void
     {
-        // Recharger toutes les relations nécessaires au calcul
-        $user->load([
-            'profile',
-            'dependents',
-            'incomeSources',
-            'fixedCharges',
-            'debts',
-            'financialGoals',
-            'tontineGroups',
-        ]);
-
-        $calculator    = new FinancialCalculatorService($user);
-        $realRemaining = $calculator->getRealRemainingBudget();
-
-        // Récupérer la dette de découvert du mois en cours si elle existe
-        $existingDebt = Debt::where('user_id', $user->id)
-            ->where('label', 'Découvert budget')
-            ->whereMonth('created_at', now()->month)
-            ->whereYear('created_at', now()->year)
-            ->first();
-
-        if ($realRemaining >= 0) {
-            // Budget positif → supprimer le découvert s'il existait
-            $existingDebt?->delete();
-            return;
-        }
-
-        // Budget négatif → montant du découvert
-        $overdraftAmount = round(abs($realRemaining), 2);
-
-        if ($existingDebt) {
-            // Mettre à jour le montant
-            $existingDebt->update([
-                'remaining_amount' => $overdraftAmount,
-                'total_amount'     => max($existingDebt->total_amount, $overdraftAmount),
-            ]);
-        } else {
-            // Créer la dette avec user_id explicite
-            Debt::create([
-                'user_id'          => $user->id,
-                'label'            => 'Découvert budget',
-                'total_amount'     => $overdraftAmount,
-                'remaining_amount' => $overdraftAmount,
-                'interest_rate'    => null,
-                'monthly_payment'  => null,
-            ]);
-        }
+        (new FinancialCalculatorService($user))->syncOverdraftDebt();
     }
 
     /**
