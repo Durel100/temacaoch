@@ -14,7 +14,19 @@ class FinanceController extends Controller
 {
     public function index(Request $request)
     {
-        $user = $request->user()->load([
+        $user = $request->user();
+
+        // Réactivation auto : une charge archivée lors d'un cycle PRÉCÉDENT redevient
+        // active au nouveau cycle (charge mensuelle récurrente). Archivée ce cycle-ci
+        // (déjà payée) → reste archivée jusqu'au prochain salary_day.
+        $cycleStart = (new FinancialCalculatorService($user))->getFinancialCycleStart();
+        $user->fixedCharges()
+            ->where('is_active', false)
+            ->whereNotNull('deactivated_at')
+            ->where('deactivated_at', '<', $cycleStart)
+            ->update(['is_active' => true, 'deactivated_at' => null]);
+
+        $user->load([
             'debts',
             'fixedCharges',
         ]);
@@ -165,8 +177,14 @@ class FinanceController extends Controller
     public function toggleCharge(Request $request, FixedCharge $charge)
     {
         if ($charge->user_id !== $request->user()->id) abort(403);
-        $charge->update(['is_active' => !$charge->is_active]);
-        $message = $charge->is_active ? 'Charge réactivée.' : 'Charge désactivée.';
+
+        $charge->is_active = !$charge->is_active;
+        // Trace la date d'archivage → sert à la réactivation auto au nouveau cycle.
+        // (assignation directe : pas besoin de deactivated_at dans $fillable)
+        $charge->deactivated_at = $charge->is_active ? null : now();
+        $charge->save();
+
+        $message = $charge->is_active ? 'Charge réactivée.' : 'Charge archivée.';
         return back()->with('success', $message);
     }
 

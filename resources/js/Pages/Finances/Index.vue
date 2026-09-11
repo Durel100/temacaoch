@@ -36,6 +36,8 @@ const debtForm = useForm({
 });
 
 const repayForm = useForm({ amount: null });
+const renamingDebt = ref(null);
+const renameForm = useForm({ label: '' });
 
 function submitDebt() {
     debtForm.post(route('finances.debts.store'), {
@@ -57,6 +59,23 @@ function submitRepay() {
     if (!repayingDebt.value) return;
     repayForm.post(route('finances.debts.repay', repayingDebt.value.id), {
         onSuccess: () => closeRepay(),
+    });
+}
+
+function openRename(debt) {
+    renamingDebt.value = debt;
+    renameForm.label   = debt.label;
+}
+
+function closeRename() {
+    renamingDebt.value = null;
+}
+
+function submitRename() {
+    if (!renamingDebt.value || !renameForm.label.trim()) return;
+    renameForm.patch(route('finances.debts.update', renamingDebt.value.id), {
+        preserveScroll: true,
+        onSuccess: () => closeRename(),
     });
 }
 
@@ -202,10 +221,32 @@ const frequencyLabel = computed(() => ({
                                     </span>
                                 </div>
                             </div>
-                            <button @click="deleteDebt(debt.id)"
-                                    class="w-7 h-7 rounded-full bg-[#1A2E2B]/5 text-[#1A2E2B]/30 text-xs flex items-center justify-center hover:bg-tema-brick/10 hover:text-tema-brick transition-all">
-                                ✕
+                            <div class="flex items-center gap-1.5">
+                                <button @click="openRename(debt)"
+                                        class="w-7 h-7 rounded-full bg-[#1A2E2B]/5 text-[#1A2E2B]/30 text-xs flex items-center justify-center hover:bg-tema-green/10 hover:text-tema-green transition-all"
+                                        :title="t('rename') ?? 'Renommer'">
+                                    ✎
+                                </button>
+                                <button @click="deleteDebt(debt.id)"
+                                        class="w-7 h-7 rounded-full bg-[#1A2E2B]/5 text-[#1A2E2B]/30 text-xs flex items-center justify-center hover:bg-tema-brick/10 hover:text-tema-brick transition-all">
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Renommer -->
+                        <div v-if="renamingDebt?.id === debt.id" class="flex gap-2 mb-3">
+                            <input type="text"
+                                   v-model="renameForm.label"
+                                   maxlength="255"
+                                   class="flex-1 text-[13px] rounded-xl border-[#1A2E2B]/15 focus:border-tema-green focus:ring-tema-green py-2.5"/>
+                            <button @click="submitRename"
+                                    :disabled="!renameForm.label.trim() || renameForm.processing"
+                                    class="bg-tema-green text-white text-[13px] font-semibold px-4 rounded-xl disabled:opacity-40 hover:bg-tema-green-light transition-all">
+                                {{ renameForm.processing ? '...' : 'OK' }}
                             </button>
+                            <button @click="closeRename"
+                                    class="text-[12px] text-[#1A2E2B]/40 px-2">✕</button>
                         </div>
 
                         <!-- Barre de progression -->

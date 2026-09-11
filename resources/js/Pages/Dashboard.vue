@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { router, useForm } from '@inertiajs/vue3';
 import { useTranslation } from '@/Composables/useTranslation';
 import axios from 'axios';
@@ -262,6 +262,35 @@ function durationLabel(est) {
     const unit    = granularityLabel(est.granularite ?? 'mois');
     return periods + ' ' + unit + (periods > 1 && locale.value === 'fr' ? 's' : '');
 }
+// ─── Budgets par catégorie ───────────────────────────────────────
+const catBudgets    = ref([]);   // [{id,name,budget,spent,percent,is_over,remaining}]
+const catLoading    = ref(true);
+const showBudgetMgr = ref(false);
+const budgetForm    = useForm({ category_id: null, monthly_budget: null });
+
+const budgetedCats = computed(() => catBudgets.value.filter(c => c.budget > 0));
+
+async function fetchCatBudgets() {
+    try {
+        const { data } = await axios.get(route('category-budgets.index'));
+        catBudgets.value = data.categories;
+    } catch (e) {
+        // silencieux — la carte reste vide
+    } finally {
+        catLoading.value = false;
+    }
+}
+
+function saveCatBudget(categoryId, amount) {
+    budgetForm.category_id    = categoryId;
+    budgetForm.monthly_budget = amount;
+    budgetForm.post(route('category-budgets.update'), {
+        preserveScroll: true,
+        onSuccess: () => fetchCatBudgets(),
+    });
+}
+
+onMounted(fetchCatBudgets);
 </script>
 
 <template>
@@ -701,6 +730,80 @@ function durationLabel(est) {
             </div>
 
             <!-- ── Budgets fixes ── -->
+            <!-- Budgets par catégorie -->
+            <div class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
+                <div class="flex justify-between items-center mb-4">
+                    <p class="text-[11px] font-semibold text-tema-dark/40 uppercase tracking-widest">
+                        {{ locale === 'en' ? 'Category budgets' : 'Budgets par catégorie' }}
+                    </p>
+                    <button v-if="budgetedCats.length"
+                            @click="showBudgetMgr = !showBudgetMgr"
+                            class="text-[11px] text-tema-green hover:underline">
+                        {{ showBudgetMgr
+                            ? (locale === 'en' ? 'Done' : 'Terminé')
+                            : (locale === 'en' ? 'Manage' : 'Gérer') }}
+                    </button>
+                </div>
+
+                <div v-if="catLoading" class="text-[13px] text-tema-dark/40 py-2">…</div>
+
+                <template v-else>
+                    <!-- Barres -->
+                    <div v-if="budgetedCats.length" class="space-y-3">
+                        <div v-for="c in budgetedCats" :key="c.id">
+                            <div class="flex justify-between text-[12px] mb-1">
+                                <span class="text-tema-dark/75 truncate pr-2">{{ c.name }}</span>
+                                <span :class="c.is_over ? 'text-tema-brick font-semibold' : 'text-tema-dark/50'">
+                                    {{ formatFcfa(c.spent) }}<span class="text-tema-dark/30"> / {{ formatFcfa(c.budget) }}</span>
+                                </span>
+                            </div>
+                            <div class="h-2 rounded-full bg-[#FAF6F0] overflow-hidden">
+                                <div class="h-full rounded-full transition-all duration-700"
+                                     :class="c.is_over ? 'bg-tema-brick' : c.percent > 80 ? 'bg-tema-ocre' : 'bg-tema-green'"
+                                     :style="{ width: Math.min(100, c.percent) + '%' }"></div>
+                            </div>
+                            <p v-if="c.is_over" class="text-[11px] text-tema-brick mt-1">
+                                {{ locale === 'en' ? 'Over by' : 'Dépassé de' }} {{ formatFcfa(c.spent - c.budget) }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- État vide : CTA bien visible -->
+                    <div v-else-if="!showBudgetMgr" class="text-center py-3">
+                        <p class="text-[13px] text-tema-dark/50 mb-3">
+                            {{ locale === 'en'
+                                ? 'Set a monthly budget on the categories where you overspend.'
+                                : 'Fixe un budget mensuel sur les catégories où tu dépenses le plus.' }}
+                        </p>
+                        <button @click="showBudgetMgr = true"
+                                class="inline-flex items-center gap-1.5 px-4 py-2.5 bg-tema-green text-white rounded-xl text-[13px] font-semibold">
+                            + {{ locale === 'en' ? 'Set a budget' : 'Définir un budget' }}
+                        </button>
+                    </div>
+
+                    <!-- Gestionnaire -->
+                    <div v-if="showBudgetMgr" class="mt-4 pt-4 border-t border-[#1A2E2B]/6 space-y-2">
+                        <p class="text-[11px] text-tema-dark/40 uppercase tracking-widest mb-1">
+                            {{ locale === 'en' ? 'Your expense categories' : 'Tes catégories de dépense' }}
+                        </p>
+                        <div v-for="c in catBudgets" :key="'mgr-' + c.id" class="flex items-center gap-2">
+                            <span class="flex-1 text-[13px] text-tema-dark/75 truncate">{{ c.name }}</span>
+                            <input type="number" inputmode="numeric" v-model.number="c.budget"
+                                   :placeholder="locale === 'en' ? 'No budget' : 'Aucun'"
+                                   class="w-28 px-2 py-1.5 rounded-lg border border-[#1A2E2B]/15 text-[13px] text-right focus:outline-none focus:border-tema-green"/>
+                            <button @click="saveCatBudget(c.id, c.budget)"
+                                    :disabled="budgetForm.processing"
+                                    class="px-3 py-1.5 rounded-lg bg-tema-green/10 text-tema-green text-[12px] font-semibold disabled:opacity-40">
+                                {{ locale === 'en' ? 'Save' : 'OK' }}
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-tema-dark/35 pt-1">
+                            {{ locale === 'en' ? 'Set 0 or empty to remove a budget.' : 'Mets 0 ou vide pour retirer un budget.' }}
+                        </p>
+                    </div>
+                </template>
+            </div>
+
             <div v-if="fixedChargesConsumption && fixedChargesConsumption.length > 0"
                  class="bg-white rounded-2xl border border-[#1A2E2B]/10 p-5">
 
