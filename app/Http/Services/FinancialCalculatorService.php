@@ -525,34 +525,12 @@ class FinancialCalculatorService
      */
     public function syncOverdraftDebt(): void
     {
-        $realRemaining = $this->getRealRemainingBudget();
-
-        // Budget positif → on ne touche à rien.
-        if ($realRemaining >= 0) {
-            return;
-        }
-
-        [$start, $end] = $this->getFinancialCycleRange();
-
-        $exists = \App\Models\Debt::where('user_id', $this->user->id)
-            ->where('is_system', true)
-            ->where('created_at', '>=', $start)
-            ->where('created_at', '<', $end)
-            ->exists();
-
-        if ($exists) {
-            return;
-        }
-
-        \App\Models\Debt::create([
-            'user_id'          => $this->user->id,
-            'label'            => 'Découvert budget',
-            'is_system'        => true,
-            'total_amount'     => round(abs($realRemaining), 2),
-            'remaining_amount' => round(abs($realRemaining), 2),
-            'interest_rate'    => null,
-            'monthly_payment'  => null,
-        ]);
+        // Découvert automatique DÉSACTIVÉ.
+        // Le solde négatif (getRealRemainingBudget) suffit à signaler le découvert,
+        // et il se corrige tout seul avec les entrées. Une dette figée dupliquait ce
+        // trou et créait des chiffres contradictoires. Les vraies dettes (prêts, etc.)
+        // ajoutées à la main restent gérées normalement.
+        return;
     }
 
         // Compatibilité — plus utilisé mais gardé pour éviter les erreurs

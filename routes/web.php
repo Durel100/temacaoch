@@ -45,6 +45,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::post('/salary/declare', [DashboardController::class, 'declareSalary'])
         ->name('salary.declare');
+        Route::post('/budget/adjust', [DashboardController::class, 'adjustBalance'])
+        ->name('budget.adjust');
 
         // ── Onboarding ──────────────────────────────────────────────
         Route::prefix('onboarding', 'verified')->name('onboarding.')->group(function () {

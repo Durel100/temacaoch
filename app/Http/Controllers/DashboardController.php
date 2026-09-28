@@ -124,4 +124,25 @@ class DashboardController extends Controller
 
         return back()->with('success', $message);
     }
+
+    /**
+     * Ajustement manuel du solde.
+     * L'utilisateur déclare le montant qu'il a RÉELLEMENT maintenant → on repose un
+     * snapshot, donc le budget repart de ce montant (dépenses/entrées recomptées à
+     * partir de maintenant). Aucune transaction ni libellé système créé : c'est juste
+     * un recalage propre du solde, sans polluer l'historique.
+     */
+    public function adjustBalance(Request $request)
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:0',
+        ]);
+
+        $request->user()->profile->update([
+            'current_month_remaining' => $validated['amount'],
+            'remaining_snapshot_date' => now(),
+        ]);
+
+        return back()->with('success', 'Solde ajusté à ' . number_format($validated['amount'], 0, ',', ' ') . ' FCFA.');
+    }
 }

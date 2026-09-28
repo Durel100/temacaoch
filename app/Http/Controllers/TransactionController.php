@@ -140,11 +140,18 @@ class TransactionController extends Controller
     }
 
     /**
-     * Dette de découvert — délègue à la logique centralisée du service.
+     * Crée (une seule fois par cycle) une dette de découvert si le budget passe négatif.
+     *
+     * Ne rembourse et ne supprime JAMAIS la dette automatiquement : une fois créée,
+     * elle appartient à l'utilisateur (à rembourser, renommer ou supprimer à la main).
+     * La détection se fait via is_system (et non le label) pour survivre au renommage.
      */
     private function syncOverdraftDebt($user): void
     {
-        (new FinancialCalculatorService($user))->syncOverdraftDebt();
+        // Découvert automatique DÉSACTIVÉ : plus de dette « Découvert budget » créée
+        // automatiquement. Le solde négatif suffit à signaler le découvert et se
+        // corrige tout seul avec les entrées.
+        return;
     }
 
     /**

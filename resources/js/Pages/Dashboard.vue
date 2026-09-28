@@ -50,6 +50,26 @@ function declareSalary() {
     });
 }
 
+// ─── Ajuster le solde manuellement ─────────────────────────────────
+const showAdjustForm = ref(false);
+const adjustForm = useForm({ amount: null });
+
+function openAdjust() {
+    showAdjustForm.value = true;
+    adjustForm.amount = Math.round(props.realRemaining ?? 0);
+}
+
+function submitAdjust() {
+    if (adjustForm.amount === null || adjustForm.amount < 0) return;
+    adjustForm.post(route('budget.adjust'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            showAdjustForm.value = false;
+            adjustForm.reset();
+        },
+    });
+}
+
 // ─── Santé financière ───────────────────────────────────────────────
 const showHealthDetail = ref(false);
 
@@ -687,6 +707,26 @@ onMounted(fetchCatBudgets);
                        class="text-[12px] text-tema-ocre mt-1">
                         {{ t('tight_margin') }}
                     </p>
+
+                    <!-- Ajuster le solde manuellement -->
+                    <button v-if="!showAdjustForm"
+                            @click="openAdjust"
+                            class="mt-2 text-[11px] text-tema-green font-semibold hover:underline">
+                        ✎ {{ locale === 'en' ? 'Adjust balance' : 'Ajuster mon solde' }}
+                    </button>
+                    <div v-else class="mt-3 flex items-center gap-2 text-left">
+                        <input type="number" inputmode="numeric"
+                               v-model.number="adjustForm.amount"
+                               :placeholder="locale === 'en' ? 'Real balance' : 'Solde réel'"
+                               class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-[#1A2E2B]/15 bg-white text-[14px] text-center focus:outline-none focus:border-tema-green"/>
+                        <button @click="submitAdjust"
+                                :disabled="adjustForm.processing || adjustForm.amount === null"
+                                class="px-4 py-2 bg-tema-green text-white rounded-lg text-[13px] font-semibold disabled:opacity-40 whitespace-nowrap">
+                            {{ locale === 'en' ? 'Set' : 'Valider' }}
+                        </button>
+                        <button @click="showAdjustForm = false"
+                                class="px-2 py-2 text-tema-dark/40 text-[15px]">✕</button>
+                    </div>
                 </div>
 
                 <!-- Alerte surplus charges fixes -->

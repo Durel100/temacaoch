@@ -291,6 +291,7 @@ class TontineController extends Controller
 
     private function syncOverdraftDebt($user): void
     {
-        (new FinancialCalculatorService($user))->syncOverdraftDebt();
+        // Découvert automatique DÉSACTIVÉ (voir FinancialCalculatorService).
+        return;
     }
 }
